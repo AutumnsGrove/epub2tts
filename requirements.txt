@@ -1,0 +1,40 @@
+# Core dependencies
+pypandoc>=1.13
+pyyaml>=6.0
+regex>=2023.0.0
+beautifulsoup4>=4.12.0
+lxml>=5.0.0
+
+# Text processing
+nltk>=3.8
+spacy>=3.7.0
+ftfy>=6.1.0
+
+# Audio/TTS
+pydub>=0.25.0
+soundfile>=0.12.0
+numpy>=1.24.0
+
+# Image processing
+Pillow>=10.0.0
+transformers>=4.36.0
+
+# Development
+pytest>=7.4.0
+pytest-cov>=4.1.0
+black>=23.0.0
+flake8>=6.0.0
+mypy>=1.5.0
+
+# Utilities
+tqdm>=4.66.0
+click>=8.1.0
+loguru>=0.7.0
+
+# Data structures
+dataclasses-json>=0.6.0
+pydantic>=2.0.0
+
+# Async support
+aiofiles>=23.0.0
+asyncio-throttle>=1.0.0

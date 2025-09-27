@@ -1,0 +1,51 @@
+# Processing settings
+processing:
+  pandoc_path: "pandoc"  # or full path
+  temp_dir: "/tmp/epub2tts"
+  max_parallel_jobs: 4
+
+# Text cleaning
+cleaning:
+  remove_footnotes: true
+  remove_page_numbers: true
+  preserve_emphasis: true
+  preserve_dialogue_marks: true
+  add_pause_markers: true
+
+# Chapter detection
+chapters:
+  detect_by_headings: true
+  min_words_per_chapter: 100
+  max_words_per_chunk: 5000  # For very long chapters
+
+# TTS settings
+tts:
+  model: "kokoro"
+  model_path: "./models/kokoro"
+  voice: "en-US-1"
+  speed: 1.0
+  pitch: 1.0
+  sample_rate: 22050
+  output_format: "wav"  # or mp3
+
+# VLM settings
+image_description:
+  enabled: true
+  model: "llava-1.5-7b"
+  model_path: "./models/llava"
+  max_description_length: 100
+  include_context: true
+
+# Output settings
+output:
+  text_format: "plain"  # plain, ssml, json
+  save_intermediate: true
+  create_metadata: true
+  generate_toc: true
+
+# Logging
+logging:
+  level: "INFO"
+  file: "./logs/epub2tts.log"
+  rotate_size: "10MB"
+  keep_days: 7

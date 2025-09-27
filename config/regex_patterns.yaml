@@ -1,0 +1,92 @@
+# Cleaning patterns with priority order
+cleaning_rules:
+  # Remove patterns
+  remove:
+    - pattern: '\[?\d+\]'  # Footnote markers [1] or 1
+      name: footnote_markers
+
+    - pattern: '^Page \d+.*$'  # Page numbers
+      name: page_numbers
+      multiline: true
+
+    - pattern: '^\s*Chapter \d+\s*$'  # Standalone chapter numbers
+      name: chapter_numbers_only
+      multiline: true
+
+    - pattern: '<[^>]+>'  # Remaining HTML tags
+      name: html_tags
+
+    - pattern: '\s{3,}'  # Excessive whitespace
+      name: excessive_spaces
+      replacement: '  '
+
+  # Transform patterns
+  transform:
+    - pattern: '^#{1,6}\s+(.+)$'  # Markdown headers
+      name: chapter_titles
+      replacement: '\n\n[CHAPTER_START: \1]\n\n'
+      multiline: true
+
+    - pattern: '!\[([^\]]*)\]\([^\)]+\)'  # Markdown images
+      name: image_descriptions
+      replacement: '\n[IMAGE: Image of \1]\n'
+
+    - pattern: '\*\*(.+?)\*\*'  # Bold text
+      name: emphasis_bold
+      replacement: '[EMPHASIS_STRONG: \1]'
+
+    - pattern: '\*(.+?)\*'  # Italic text
+      name: emphasis_italic
+      replacement: '[EMPHASIS_MILD: \1]'
+
+    - pattern: '^"(.+)"$'  # Dialogue
+      name: dialogue_quotes
+      replacement: '[DIALOGUE_START]\1[DIALOGUE_END]'
+      multiline: true
+
+    - pattern: '—'  # Em dash
+      name: em_dash
+      replacement: ' -- '
+
+    - pattern: '…'  # Ellipsis
+      name: ellipsis
+      replacement: '…'
+
+  # URL handling
+  urls:
+    - pattern: 'https?://[^\s)]+'
+      name: url_expansion
+      replacement: '[URL: \0]'
+
+  # Special characters for TTS
+  tts_replacements:
+    '&': ' and '
+    '%': ' percent '
+    '$': ' dollars '
+    '€': ' euros '
+    '£': ' pounds '
+    '@': ' at '
+    '#': ' number '
+
+# Pause insertion rules
+pause_rules:
+  chapter_start: 2.0
+  paragraph_end: 0.5
+  question_end: 0.3
+  exclamation_end: 0.2
+  dialogue_end: 0.3
+  sentence_end: 0.1
+
+# Chapter detection patterns
+chapter_detection:
+  patterns:
+    - '^Chapter\s+\d+'
+    - '^Chapter\s+[IVX]+'
+    - '^CHAPTER\s+\d+'
+    - '^#{1,3}\s+Chapter'
+    - '^\d+\.\s*[A-Z]'
+
+  confidence_thresholds:
+    high: 0.9
+    medium: 0.7
+    low: 0.5
