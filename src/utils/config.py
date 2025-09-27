@@ -43,12 +43,21 @@ class ChapterConfig:
 class TTSConfig:
     """Configuration for TTS pipeline."""
     model: str = "kokoro"
-    model_path: str = "./models/kokoro"
-    voice: str = "en-US-1"
+    model_path: str = "hexgrad/Kokoro-82M"
+    voice: str = "bf_lily"
     speed: float = 1.0
     pitch: float = 1.0
     sample_rate: int = 22050
     output_format: str = "wav"
+
+    # MLX-specific settings
+    use_mlx: bool = True
+    quantization: bool = False
+    mlx_cache_dir: Optional[str] = None
+
+    # Performance settings
+    batch_size: int = 1
+    max_workers: int = 4
 
 
 @dataclass

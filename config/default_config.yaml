@@ -21,12 +21,21 @@ chapters:
 # TTS settings
 tts:
   model: "kokoro"
-  model_path: "./models/kokoro"
-  voice: "en-US-1"
+  model_path: "./models/kokoro-mlx"
+  voice: "bf_lily"
   speed: 1.0
   pitch: 1.0
   sample_rate: 22050
   output_format: "wav"  # or mp3
+
+  # MLX-specific settings
+  use_mlx: true
+  quantization: false
+  mlx_cache_dir: null
+
+  # Performance settings
+  batch_size: 1
+  max_workers: 4
 
 # VLM settings
 image_description:

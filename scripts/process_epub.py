@@ -41,7 +41,7 @@ from utils.logger import setup_logging
               default=True,
               help='Split output by chapters')
 @click.option('--voice', '-v',
-              default='default',
+              default='bf_lily',
               help='TTS voice selection')
 @click.option('--speed',
               type=float,
@@ -84,7 +84,7 @@ def process_epub(
         python process_epub.py book.epub
 
         # Full pipeline with TTS
-        python process_epub.py book.epub --tts --voice "en-US-1"
+        python process_epub.py book.epub --tts --voice "bf_lily"
 
         # Custom configuration and output
         python process_epub.py book.epub -c custom_config.yaml -o ./my_output
@@ -111,7 +111,7 @@ def process_epub(
             app_config.output.text_format = format
         if not images:
             app_config.image_description.enabled = False
-        if voice != 'default':
+        if voice != 'bf_lily':
             app_config.tts.voice = voice
         if speed != 1.0:
             app_config.tts.speed = speed

@@ -71,21 +71,22 @@ class KokoroTTSPipeline:
     def _initialize_model(self) -> None:
         """Initialize the Kokoro TTS model."""
         try:
-            # Note: This is a placeholder for actual Kokoro model loading
-            # In real implementation, this would load the actual Kokoro model
-            logger.info(f"Loading Kokoro model from: {self.config.model_path}")
+            logger.info(f"Loading Kokoro model: {self.config.model}")
 
-            # Simulate model loading
-            if not Path(self.config.model_path).exists():
-                logger.warning(f"Model path does not exist: {self.config.model_path}")
-                logger.info("Using mock TTS for development/testing")
-                self.model = MockKokoroModel(self.config)
+            # Try to load MLX Kokoro model first
+            if self.config.use_mlx:
+                try:
+                    self.model = MLXKokoroModel(self.config)
+                    logger.info("Using MLX-optimized Kokoro model")
+                except (ImportError, RuntimeError) as e:
+                    logger.warning(f"MLX Kokoro not available: {e}")
+                    logger.info("Falling back to mock TTS for development")
+                    self.model = MockKokoroModel(self.config)
             else:
-                # Load actual Kokoro model here
-                self.model = MockKokoroModel(self.config)  # Placeholder
+                logger.info("MLX disabled in config, using mock TTS for development")
+                self.model = MockKokoroModel(self.config)
 
             self.is_initialized = True
-            logger.info("Kokoro TTS model initialized successfully")
 
         except Exception as e:
             logger.error(f"Failed to initialize Kokoro model: {e}")
@@ -435,6 +436,113 @@ class KokoroTTSPipeline:
         }
 
 
+class MLXKokoroModel:
+    """Real Kokoro model using direct Kokoro library with MLX backend."""
+
+    def __init__(self, config: TTSConfig):
+        """Initialize MLX Kokoro model."""
+        try:
+            # Try MLX-Audio first
+            try:
+                from mlx_audio.tts.generate import generate_audio
+                self.generate_func = generate_audio
+                self.use_mlx_audio = True
+                logger.info("Using MLX-Audio backend")
+            except ImportError:
+                # Fall back to direct Kokoro
+                from kokoro import KPipeline
+                self.pipeline = KPipeline(lang_code='a')
+                self.use_mlx_audio = False
+                logger.info("Using direct Kokoro backend")
+
+            self.config = config
+            self.model_path = config.model_path
+            self.voice = config.voice
+            logger.info("Initialized MLX Kokoro model successfully")
+        except ImportError as e:
+            logger.error(f"Failed to import Kokoro libraries: {e}")
+            raise RuntimeError("Kokoro TTS not available")
+
+    def synthesize(
+        self,
+        text: str,
+        voice: str = "bf_lily",
+        speed: float = 1.0,
+        pitch: float = 1.0
+    ) -> np.ndarray:
+        """
+        Generate audio using Kokoro model.
+
+        Args:
+            text: Text to synthesize
+            voice: Voice to use (default: bf_lily)
+            speed: Speech speed multiplier
+            pitch: Pitch adjustment (note: may not be supported)
+
+        Returns:
+            Audio data as numpy array
+        """
+        try:
+            if self.use_mlx_audio:
+                # Try MLX-Audio first, fall back to direct Kokoro on failure
+                try:
+                    audio_data = self.generate_func(
+                        text=text,
+                        model_path=self.model_path,
+                        voice=voice,
+                        speed=speed
+                    )
+                except (SystemExit, Exception) as e:
+                    logger.warning(f"MLX-Audio failed ({e}), falling back to direct Kokoro")
+                    # Initialize direct Kokoro if not already done
+                    if not hasattr(self, 'pipeline'):
+                        from kokoro import KPipeline
+                        self.pipeline = KPipeline(lang_code='a')
+
+                    # Use direct Kokoro pipeline
+                    generator = self.pipeline(text, voice=voice)
+                    audio_data = np.array(list(generator))
+
+                    # Adjust speed if needed
+                    if speed != 1.0:
+                        from scipy import signal
+                        audio_data = signal.resample(audio_data, int(len(audio_data) / speed))
+            else:
+                # Use direct Kokoro pipeline
+                generator = self.pipeline(text, voice=voice)
+                audio_data = np.array(list(generator))
+
+                # Adjust speed if needed (simple time-stretch)
+                if speed != 1.0:
+                    # Simple speed adjustment by resampling
+                    from scipy import signal
+                    audio_data = signal.resample(audio_data, int(len(audio_data) / speed))
+
+            # Convert to numpy array if needed
+            if not isinstance(audio_data, np.ndarray):
+                audio_data = np.array(audio_data)
+
+            return audio_data.astype(np.float32)
+
+        except Exception as e:
+            logger.error(f"Kokoro synthesis failed: {e}")
+            raise
+
+    def get_available_voices(self) -> List[str]:
+        """Get list of available voices."""
+        # Get voices from the MLX model directory if available
+        try:
+            voices_dir = Path(self.model_path) / "voices"
+            if voices_dir.exists():
+                voices = [f.stem for f in voices_dir.glob("*.pt")]
+                return sorted(voices)
+        except Exception:
+            pass
+
+        # Default voices list
+        return ["bf_lily", "af_heart", "bf_emma", "am_adam", "af_sarah", "bf_grace"]
+
+
 class MockKokoroModel:
     """Mock Kokoro model for development and testing."""
 
@@ -446,7 +554,7 @@ class MockKokoroModel:
     def synthesize(
         self,
         text: str,
-        voice: str = "default",
+        voice: str = "bf_lily",
         speed: float = 1.0,
         pitch: float = 1.0
     ) -> np.ndarray:
@@ -485,7 +593,7 @@ class MockKokoroModel:
 
     def get_available_voices(self) -> List[str]:
         """Get list of available voices."""
-        return ["default", "male", "female", "neutral"]
+        return ["bf_lily", "af_heart", "bf_emma", "am_adam", "af_sarah", "bf_grace"]
 
 
 def create_tts_pipeline(config: TTSConfig) -> KokoroTTSPipeline:
