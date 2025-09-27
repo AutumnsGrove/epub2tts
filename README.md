@@ -54,7 +54,7 @@ choco install pandoc ffmpeg
 ### Install Python Package
 
 ```bash
-git clone https://github.com/[username]/epub2tts.git
+git clone https://github.com/AutumnsGrove/epub2tts.git
 cd epub2tts
 pip install -r requirements.txt
 pip install -e .

@@ -9,12 +9,12 @@ with open("requirements.txt", "r", encoding="utf-8") as fh:
 setup(
     name="epub2tts",
     version="0.1.0",
-    author="Your Name",
-    author_email="your.email@example.com",
+    author="AutumnsGrove",
+    author_email="noreply@github.com",
     description="A production-ready EPUB to TTS converter",
     long_description=long_description,
     long_description_content_type="text/markdown",
-    url="https://github.com/yourusername/epub2tts",
+    url="https://github.com/AutumnsGrove/epub2tts",
     package_dir={"": "src"},
     packages=find_packages(where="src"),
     classifiers=[
