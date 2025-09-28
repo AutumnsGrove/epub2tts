@@ -20,6 +20,7 @@ from pipelines.tts_pipeline import KokoroTTSPipeline, TTSResult, create_tts_pipe
 from pipelines.image_pipeline import ImageDescriptionPipeline, ImageDescription, create_image_pipeline
 from utils.config import Config
 from utils.logger import PerformanceLogger, LoggerMixin
+from ui.progress_tracker import ProgressTracker
 
 logger = logging.getLogger(__name__)
 
@@ -50,14 +51,16 @@ class PipelineOrchestrator(LoggerMixin):
     Orchestrates the complete epub2tts processing pipeline.
     """
 
-    def __init__(self, config: Config):
+    def __init__(self, config: Config, progress_tracker: Optional[ProgressTracker] = None):
         """
         Initialize pipeline orchestrator.
 
         Args:
             config: Application configuration
+            progress_tracker: Optional progress tracking system
         """
         self.config = config
+        self.progress_tracker = progress_tracker
         self.epub_processor = EPUBProcessor(config)
 
         # Initialize pipelines based on configuration
@@ -66,14 +69,14 @@ class PipelineOrchestrator(LoggerMixin):
 
         if config.tts.model:
             try:
-                self.tts_pipeline = create_tts_pipeline(config.tts)
+                self.tts_pipeline = create_tts_pipeline(config.tts, progress_tracker)
                 self.logger.info("TTS pipeline initialized")
             except Exception as e:
                 self.logger.error(f"Failed to initialize TTS pipeline: {e}")
 
         if config.image_description.enabled:
             try:
-                self.image_pipeline = create_image_pipeline(config.image_description)
+                self.image_pipeline = create_image_pipeline(config.image_description, progress_tracker)
                 self.logger.info("Image description pipeline initialized")
             except Exception as e:
                 self.logger.error(f"Failed to initialize image pipeline: {e}")

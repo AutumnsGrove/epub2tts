@@ -19,6 +19,10 @@ from tqdm import tqdm
 
 from utils.config import TTSConfig
 from utils.logger import PerformanceLogger, ProgressLogger
+from ui.progress_tracker import (
+    ProgressTracker, PipelineType, EventType,
+    create_start_event, create_progress_event, create_complete_event, create_error_event
+)
 
 logger = logging.getLogger(__name__)
 
@@ -50,17 +54,19 @@ class KokoroTTSPipeline:
     Pipeline for Kokoro TTS model integration with advanced features.
     """
 
-    def __init__(self, config: TTSConfig):
+    def __init__(self, config: TTSConfig, progress_tracker: Optional[ProgressTracker] = None):
         """
         Initialize Kokoro TTS pipeline.
 
         Args:
             config: TTS configuration object
+            progress_tracker: Optional progress tracking system
 
         Raises:
             RuntimeError: If Kokoro model cannot be loaded
         """
         self.config = config
+        self.progress_tracker = progress_tracker
         self.model = None
         self.voice_embeddings: Dict[str, Any] = {}
         self.is_initialized = False
@@ -112,6 +118,14 @@ class KokoroTTSPipeline:
 
         start_time = time.time()
 
+        # Emit start event
+        if self.progress_tracker:
+            self.progress_tracker.emit_event(create_start_event(
+                PipelineType.TTS,
+                total_items=1,
+                current_item=chunk_id or "Unknown chunk"
+            ))
+
         try:
             with PerformanceLogger(f"TTS chunk processing: {chunk_id}"):
                 # Preprocess text for TTS
@@ -156,6 +170,16 @@ class KokoroTTSPipeline:
                     f"({duration:.2f}s audio, {processing_time:.2f}s processing)"
                 )
 
+                # Emit completion event
+                if self.progress_tracker:
+                    self.progress_tracker.emit_event(create_complete_event(
+                        PipelineType.TTS,
+                        current_item=chunk_id or "Unknown chunk",
+                        duration=duration,
+                        processing_time=processing_time,
+                        file_size=output_path.stat().st_size if output_path.exists() else 0
+                    ))
+
                 return TTSResult(
                     success=True,
                     audio_path=str(output_path),
@@ -168,6 +192,15 @@ class KokoroTTSPipeline:
         except Exception as e:
             error_msg = f"TTS processing failed for chunk {chunk_id}: {e}"
             logger.error(error_msg)
+
+            # Emit error event
+            if self.progress_tracker:
+                self.progress_tracker.emit_event(create_error_event(
+                    PipelineType.TTS,
+                    error_message=error_msg,
+                    current_item=chunk_id or "Unknown chunk"
+                ))
+
             return TTSResult(
                 success=False,
                 error_message=error_msg,
@@ -198,6 +231,14 @@ class KokoroTTSPipeline:
         logger.info(f"Starting batch TTS processing: {len(text_chunks)} chunks")
         output_dir.mkdir(parents=True, exist_ok=True)
 
+        # Emit start event for batch processing
+        if self.progress_tracker:
+            self.progress_tracker.emit_event(create_start_event(
+                PipelineType.TTS,
+                total_items=len(text_chunks),
+                current_item=f"Batch processing {len(text_chunks)} chunks"
+            ))
+
         results = []
         progress = ProgressLogger("TTS processing", len(text_chunks))
 
@@ -225,6 +266,15 @@ class KokoroTTSPipeline:
                     results.append(result)
                     progress.update()
 
+                    # Emit progress event
+                    if self.progress_tracker:
+                        self.progress_tracker.emit_event(create_progress_event(
+                            PipelineType.TTS,
+                            completed_items=len(results),
+                            total_items=len(text_chunks),
+                            current_item=f"Processed {len(results)}/{len(text_chunks)} chunks"
+                        ))
+
         else:
             # Sequential processing
             for i, chunk in enumerate(text_chunks):
@@ -238,6 +288,15 @@ class KokoroTTSPipeline:
                 )
                 results.append(result)
                 progress.update()
+
+                # Emit progress event
+                if self.progress_tracker:
+                    self.progress_tracker.emit_event(create_progress_event(
+                        PipelineType.TTS,
+                        completed_items=len(results),
+                        total_items=len(text_chunks),
+                        current_item=f"Processed {len(results)}/{len(text_chunks)} chunks"
+                    ))
 
         progress.finish()
 
@@ -455,18 +514,23 @@ class MLXKokoroModel:
             warnings.filterwarnings("ignore", message=".*word count mismatch.*")
             warnings.filterwarnings("ignore", message=".*phonemizer.*")
 
-            # Try MLX-Audio first
+            # Try to import Kokoro directly first (preferred for local models)
             try:
-                from mlx_audio.tts.generate import generate_audio
-                self.generate_func = generate_audio
-                self.use_mlx_audio = True
-                logger.info("Using MLX-Audio backend")
-            except ImportError:
-                # Fall back to direct Kokoro
                 from kokoro import KPipeline
                 self.pipeline = KPipeline('a')  # 'a' for autodetect
                 self.use_mlx_audio = False
-                logger.info("Using direct Kokoro backend")
+                logger.info("Using direct Kokoro backend (best for local models)")
+            except ImportError as e:
+                logger.warning(f"Direct Kokoro not available: {e}")
+                # Fall back to MLX-Audio if available
+                try:
+                    from mlx_audio.tts.generate import generate_audio
+                    self.generate_func = generate_audio
+                    self.use_mlx_audio = True
+                    logger.info("Using MLX-Audio backend (HuggingFace models only)")
+                except ImportError as e2:
+                    logger.error(f"Neither Kokoro nor MLX-Audio available: {e}, {e2}")
+                    raise RuntimeError("No TTS backend available")
 
             self.config = config
             self.model_path = config.model_path
@@ -507,7 +571,10 @@ class MLXKokoroModel:
                 # Clear GPU resources before synthesis to prevent Metal errors
                 self._cleanup_metal_resources()
 
-                if attempt == 0 and self.degradation_level == 0 and self.use_mlx_audio:
+                # Prefer direct Kokoro for local models
+                if self.degradation_level == 0 and not self.use_mlx_audio:
+                    return self._try_direct_kokoro(text, voice, speed, pitch)
+                elif attempt == 0 and self.degradation_level == 0 and self.use_mlx_audio:
                     return self._try_mlx_audio(text, voice, speed, pitch)
                 elif self.degradation_level <= 1:
                     return self._try_direct_kokoro(text, voice, speed, pitch)
@@ -542,7 +609,7 @@ class MLXKokoroModel:
                 # Force synchronization before cleanup
                 mx.eval([])
                 # Clear any pending operations
-                mx.metal.clear_cache()
+                mx.clear_cache()
                 # Small delay to allow Metal framework to finish pending operations
                 time.sleep(0.1)
             except (ImportError, AttributeError) as e:
@@ -586,6 +653,12 @@ class MLXKokoroModel:
     def _try_mlx_audio(self, text: str, voice: str, speed: float, pitch: float) -> np.ndarray:
         """Try MLX-Audio synthesis with improved file handling."""
         logger.debug(f"Attempting MLX-Audio synthesis: '{text[:50]}...'")
+
+        # MLX-Audio expects HuggingFace repo format, not local paths
+        # Skip MLX-Audio if we're using local models
+        if self.model_path.startswith('./') or self.model_path.startswith('/'):
+            logger.debug("Local model path detected, skipping MLX-Audio")
+            raise RuntimeError("MLX-Audio does not support local model paths")
 
         # Create dedicated output directory
         from pathlib import Path
@@ -806,14 +879,15 @@ class MockKokoroModel:
         return ["bf_lily", "af_heart", "bf_emma", "am_adam", "af_sarah", "bf_grace"]
 
 
-def create_tts_pipeline(config: TTSConfig) -> KokoroTTSPipeline:
+def create_tts_pipeline(config: TTSConfig, progress_tracker: Optional[ProgressTracker] = None) -> KokoroTTSPipeline:
     """
     Factory function to create TTS pipeline.
 
     Args:
         config: TTS configuration
+        progress_tracker: Optional progress tracking system
 
     Returns:
         Initialized TTS pipeline
     """
-    return KokoroTTSPipeline(config)
+    return KokoroTTSPipeline(config, progress_tracker)

@@ -58,6 +58,10 @@ from utils.logger import setup_logging
               help='Only validate EPUB file without processing')
 @click.option('--info', is_flag=True,
               help='Show EPUB information without full processing')
+@click.option('--ui-mode',
+              type=click.Choice(['classic', 'split-window']),
+              default='classic',
+              help='Terminal UI mode (classic or split-window)')
 def process_epub(
     input_file: Path,
     output_dir: Path,
@@ -71,7 +75,8 @@ def process_epub(
     verbose: bool,
     resume: bool,
     validate_only: bool,
-    info: bool
+    info: bool,
+    ui_mode: str
 ):
     """
     Convert EPUB to TTS-optimized text and optionally generate audio.
@@ -85,6 +90,9 @@ def process_epub(
 
         # Full pipeline with TTS
         python process_epub.py book.epub --tts --voice "bf_lily"
+
+        # Full pipeline with split-window UI
+        python process_epub.py book.epub --tts --images --ui-mode split-window
 
         # Custom configuration and output
         python process_epub.py book.epub -c custom_config.yaml -o ./my_output
@@ -115,6 +123,8 @@ def process_epub(
             app_config.tts.voice = voice
         if speed != 1.0:
             app_config.tts.speed = speed
+        if ui_mode != 'classic':
+            app_config.ui.mode = ui_mode
 
         # Validate speed
         if not (0.5 <= speed <= 2.0):
@@ -207,17 +217,37 @@ def process_epub(
                 click.echo("\n🔊 Starting TTS generation...")
                 try:
                     from pipelines.orchestrator import PipelineOrchestrator
+                    from ui.progress_tracker import ProgressTracker
+                    from ui.terminal_ui import create_ui_manager
 
-                    # Initialize orchestrator with TTS enabled
-                    orchestrator = PipelineOrchestrator(app_config)
+                    # Initialize progress tracker and UI
+                    progress_tracker = ProgressTracker()
+                    ui_manager = create_ui_manager(app_config.ui, progress_tracker)
 
-                    # Run full pipeline with TTS
-                    pipeline_result = orchestrator.process_epub_complete(
-                        input_file,
-                        output_dir,
-                        enable_tts=True,
-                        enable_images=images
-                    )
+                    # Start UI if split-window mode is enabled
+                    ui_started = False
+                    if app_config.ui.mode == "split-window":
+                        click.echo("Starting split-window terminal UI...")
+                        ui_started = ui_manager.start()
+                        if not ui_started:
+                            click.echo("⚠️  Split-window UI not available, falling back to classic mode")
+
+                    # Initialize orchestrator with progress tracking
+                    orchestrator = PipelineOrchestrator(app_config, progress_tracker)
+
+                    try:
+                        # Run full pipeline with TTS
+                        pipeline_result = orchestrator.process_epub_complete(
+                            input_file,
+                            output_dir,
+                            enable_tts=True,
+                            enable_images=images
+                        )
+                    finally:
+                        # Stop UI if it was started
+                        if ui_started:
+                            ui_manager.stop()
+                            click.echo("\nTerminal UI stopped.")
 
                     if pipeline_result.tts_results:
                         tts_stats = pipeline_result.tts_results

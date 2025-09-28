@@ -1,0 +1,45 @@
+{
+  "epub_file": "A System for Writing.epub",
+  "ebooklib_result": {
+    "success": true,
+    "processor": "ebooklib",
+    "chapters": 13,
+    "total_words": 39645,
+    "text_length": 243124,
+    "metadata_keys": [
+      "title",
+      "authors",
+      "publisher",
+      "publication_date",
+      "language",
+      "identifier",
+      "description",
+      "subjects",
+      "rights",
+      "spine_length",
+      "has_toc",
+      "epub_version"
+    ],
+    "first_chapter_title": "Introduction",
+    "processing_time": 0.15747904777526855,
+    "output_dir": "/var/folders/q5/qt7z1d_s2dg3c98yct2nt17m0000gn/T/epub2tts_ebooklib_d9wtcdyn"
+  },
+  "pandoc_result": {
+    "success": true,
+    "processor": "pandoc",
+    "chapters": 3,
+    "total_words": 10618,
+    "text_length": 331115,
+    "metadata_keys": [
+      "title",
+      "author",
+      "publisher",
+      "date",
+      "language",
+      "identifier"
+    ],
+    "first_chapter_title": "Chapter 5 - Part 1",
+    "processing_time": 1.3779172897338867,
+    "output_dir": "/var/folders/q5/qt7z1d_s2dg3c98yct2nt17m0000gn/T/epub2tts_pandoc__5glfr8h"
+  }
+}

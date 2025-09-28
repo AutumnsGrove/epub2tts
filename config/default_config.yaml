@@ -1,10 +1,18 @@
 # Processing settings
 processing:
-  pandoc_path: "pandoc"  # or full path
+  epub_processor: "ebooklib"  # "ebooklib" (modern, native) or "pandoc" (legacy)
+  pandoc_path: "pandoc"  # or full path (only used if epub_processor is "pandoc")
   temp_dir: "/tmp/epub2tts"
   max_parallel_jobs: 4
 
-# Text cleaning
+# Text processing
+text_processing:
+  processor_mode: "modern"  # "legacy" (regex), "modern" (spacy+nlp), "hybrid" (both)
+  spacy_model: "en_core_web_sm"
+  chunk_size: 4000
+  chunk_overlap: 200
+
+# Text cleaning (legacy settings, used in legacy/hybrid modes)
 cleaning:
   remove_footnotes: true
   remove_page_numbers: true
@@ -12,11 +20,13 @@ cleaning:
   preserve_dialogue_marks: true
   add_pause_markers: true
 
-# Chapter detection
+# Chapter detection (enhanced with modern options)
 chapters:
   detect_by_headings: true
+  use_toc_when_available: true  # Use TOC from EbookLib for accurate boundaries
   min_words_per_chapter: 100
   max_words_per_chunk: 5000  # For very long chapters
+  confidence_threshold: 0.6  # Minimum confidence for chapter detection
 
 # TTS settings
 tts:
@@ -59,3 +69,23 @@ logging:
   file: "./logs/epub2tts.log"
   rotate_size: "10MB"
   keep_days: 7
+
+# Terminal UI settings
+ui:
+  mode: "classic"  # "classic" or "split-window"
+  window_height: 20
+  update_frequency: 0.1  # seconds
+  show_stats: true
+  show_progress_bars: true
+  show_recent_activity: true
+  recent_activity_lines: 3
+
+  # Color scheme
+  colors:
+    progress_complete: "green"
+    progress_incomplete: "white"
+    error: "red"
+    warning: "yellow"
+    info: "blue"
+    success: "green"
+    processing: "cyan"

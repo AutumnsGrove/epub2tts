@@ -19,6 +19,10 @@ import numpy as np
 
 from utils.config import ImageConfig
 from utils.logger import PerformanceLogger, ProgressLogger
+from ui.progress_tracker import (
+    ProgressTracker, PipelineType, EventType,
+    create_start_event, create_progress_event, create_complete_event, create_error_event
+)
 
 logger = logging.getLogger(__name__)
 
@@ -510,18 +514,20 @@ class ImageDescriptionPipeline:
     Local VLM pipeline for image description generation.
     """
 
-    def __init__(self, config: ImageConfig, cache_dir: Optional[Path] = None):
+    def __init__(self, config: ImageConfig, cache_dir: Optional[Path] = None, progress_tracker: Optional[ProgressTracker] = None):
         """
         Initialize image description pipeline.
 
         Args:
             config: Image processing configuration
             cache_dir: Optional cache directory path
+            progress_tracker: Optional progress tracking system
         """
         self.config = config
         self.cache_dir = cache_dir or Path(".vlm_cache")
         self.cache = ImageDescriptionCache(self.cache_dir)
         self.model: Optional[BaseVLMModel] = None
+        self.progress_tracker = progress_tracker
 
         logger.info(f"Initializing VLM pipeline with model: {config.model}")
         self._initialize_model()
@@ -572,10 +578,25 @@ class ImageDescriptionPipeline:
         """
         start_time = time.time()
 
+        # Emit start event
+        if self.progress_tracker:
+            self.progress_tracker.emit_event(create_start_event(
+                PipelineType.IMAGE,
+                total_items=1,
+                current_item=Path(image_path).name
+            ))
+
         # Check cache first
         if not force_regenerate:
             cached_description = self.cache.get(image_path, context)
             if cached_description:
+                # Emit completion event for cache hit
+                if self.progress_tracker:
+                    self.progress_tracker.emit_event(create_complete_event(
+                        PipelineType.IMAGE,
+                        current_item=Path(image_path).name,
+                        cache_hit=True
+                    ))
                 return cached_description
 
         try:
@@ -628,10 +649,29 @@ class ImageDescriptionPipeline:
                 f"{len(description_text)} chars, {processing_time:.2f}s"
             )
 
+            # Emit completion event
+            if self.progress_tracker:
+                self.progress_tracker.emit_event(create_complete_event(
+                    PipelineType.IMAGE,
+                    current_item=Path(image_path).name,
+                    processing_time=processing_time,
+                    description_length=len(description_text),
+                    confidence=confidence
+                ))
+
             return description
 
         except Exception as e:
             logger.error(f"Error processing image {image_path}: {e}")
+
+            # Emit error event
+            if self.progress_tracker:
+                self.progress_tracker.emit_event(create_error_event(
+                    PipelineType.IMAGE,
+                    error_message=str(e),
+                    current_item=Path(image_path).name
+                ))
+
             return ImageDescription(
                 image_path=image_path,
                 description=f"Error processing image: {e}",
@@ -658,6 +698,14 @@ class ImageDescriptionPipeline:
         """
         start_time = time.time()
         logger.info(f"Starting batch image processing: {len(image_list)} images")
+
+        # Emit start event for batch processing
+        if self.progress_tracker:
+            self.progress_tracker.emit_event(create_start_event(
+                PipelineType.IMAGE,
+                total_items=len(image_list),
+                current_item=f"Batch processing {len(image_list)} images"
+            ))
 
         if not self.config.enabled:
             logger.info("Image description disabled in configuration")
@@ -702,6 +750,17 @@ class ImageDescriptionPipeline:
                         if description.cache_hit:
                             cache_hits += 1
                         progress.update()
+
+                        # Emit progress event
+                        if self.progress_tracker:
+                            self.progress_tracker.emit_event(create_progress_event(
+                                PipelineType.IMAGE,
+                                completed_items=len(descriptions),
+                                total_items=len(image_list),
+                                current_item=f"Processed {len(descriptions)}/{len(image_list)} images",
+                                custom_stats={'cache_hits': cache_hits}
+                            ))
+
                     except Exception as e:
                         logger.error(f"Error in parallel image processing: {e}")
                         progress.update()
@@ -717,6 +776,16 @@ class ImageDescriptionPipeline:
                 if description.cache_hit:
                     cache_hits += 1
                 progress.update()
+
+                # Emit progress event
+                if self.progress_tracker:
+                    self.progress_tracker.emit_event(create_progress_event(
+                        PipelineType.IMAGE,
+                        completed_items=len(descriptions),
+                        total_items=len(image_list),
+                        current_item=f"Processed {len(descriptions)}/{len(image_list)} images",
+                        custom_stats={'cache_hits': cache_hits}
+                    ))
 
         progress.finish()
 
@@ -803,14 +872,15 @@ class ImageDescriptionPipeline:
         logger.debug("VLM pipeline cleaned up")
 
 
-def create_image_pipeline(config: ImageConfig) -> ImageDescriptionPipeline:
+def create_image_pipeline(config: ImageConfig, progress_tracker: Optional[ProgressTracker] = None) -> ImageDescriptionPipeline:
     """
     Factory function to create image description pipeline.
 
     Args:
         config: Image processing configuration
+        progress_tracker: Optional progress tracking system
 
     Returns:
         Initialized image description pipeline
     """
-    return ImageDescriptionPipeline(config)
+    return ImageDescriptionPipeline(config, progress_tracker=progress_tracker)

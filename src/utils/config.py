@@ -16,9 +16,19 @@ logger = logging.getLogger(__name__)
 @dataclass
 class ProcessingConfig:
     """Configuration for text processing."""
+    epub_processor: str = "ebooklib"  # "ebooklib" or "pandoc"
     pandoc_path: str = "pandoc"
     temp_dir: str = "/tmp/epub2tts"
     max_parallel_jobs: int = 4
+
+
+@dataclass
+class TextProcessingConfig:
+    """Configuration for modern text processing."""
+    processor_mode: str = "modern"  # "legacy", "modern", "hybrid"
+    spacy_model: str = "en_core_web_sm"
+    chunk_size: int = 4000
+    chunk_overlap: int = 200
 
 
 @dataclass
@@ -35,8 +45,10 @@ class CleaningConfig:
 class ChapterConfig:
     """Configuration for chapter detection."""
     detect_by_headings: bool = True
+    use_toc_when_available: bool = True
     min_words_per_chapter: int = 100
     max_words_per_chunk: int = 5000
+    confidence_threshold: float = 0.6
 
 
 @dataclass
@@ -90,27 +102,54 @@ class LoggingConfig:
 
 
 @dataclass
+class UIConfig:
+    """Configuration for terminal UI."""
+    mode: str = "classic"  # "classic" or "split-window"
+    window_height: int = 20
+    update_frequency: float = 0.1  # seconds
+    show_stats: bool = True
+    show_progress_bars: bool = True
+    show_recent_activity: bool = True
+    recent_activity_lines: int = 3
+
+    # Color scheme
+    colors: Dict[str, str] = field(default_factory=lambda: {
+        'progress_complete': 'green',
+        'progress_incomplete': 'white',
+        'error': 'red',
+        'warning': 'yellow',
+        'info': 'blue',
+        'success': 'green',
+        'processing': 'cyan'
+    })
+
+
+@dataclass
 class Config:
     """Main configuration container."""
     processing: ProcessingConfig = field(default_factory=ProcessingConfig)
+    text_processing: TextProcessingConfig = field(default_factory=TextProcessingConfig)
     cleaning: CleaningConfig = field(default_factory=CleaningConfig)
     chapters: ChapterConfig = field(default_factory=ChapterConfig)
     tts: TTSConfig = field(default_factory=TTSConfig)
     image_description: ImageConfig = field(default_factory=ImageConfig)
     output: OutputConfig = field(default_factory=OutputConfig)
     logging: LoggingConfig = field(default_factory=LoggingConfig)
+    ui: UIConfig = field(default_factory=UIConfig)
 
     @classmethod
     def from_dict(cls, config_dict: Dict[str, Any]) -> 'Config':
         """Create Config from dictionary."""
         return cls(
             processing=ProcessingConfig(**config_dict.get('processing', {})),
+            text_processing=TextProcessingConfig(**config_dict.get('text_processing', {})),
             cleaning=CleaningConfig(**config_dict.get('cleaning', {})),
             chapters=ChapterConfig(**config_dict.get('chapters', {})),
             tts=TTSConfig(**config_dict.get('tts', {})),
             image_description=ImageConfig(**config_dict.get('image_description', {})),
             output=OutputConfig(**config_dict.get('output', {})),
-            logging=LoggingConfig(**config_dict.get('logging', {}))
+            logging=LoggingConfig(**config_dict.get('logging', {})),
+            ui=UIConfig(**config_dict.get('ui', {}))
         )
 
 

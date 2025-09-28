@@ -14,6 +14,7 @@ import json
 import shutil
 
 from core.pandoc_wrapper import PandocConverter, PandocError
+from core.ebooklib_processor import EbookLibProcessor
 from core.text_cleaner import TextCleaner, Chapter, CleaningStats
 from utils.config import Config
 
@@ -60,8 +61,19 @@ class EPUBProcessor:
             config: Configuration object
         """
         self.config = config
-        self.pandoc = PandocConverter(config.processing.pandoc_path)
-        self.cleaner = TextCleaner()
+
+        # Determine which processor to use
+        processor_type = getattr(config.processing, 'epub_processor', 'pandoc')
+
+        if processor_type == 'ebooklib':
+            logger.info("Using EbookLib processor for modern EPUB handling")
+            self.processor = EbookLibProcessor(config)
+            self.use_ebooklib = True
+        else:
+            logger.info("Using Pandoc processor for legacy EPUB handling")
+            self.processor = PandocConverter(config.processing.pandoc_path)
+            self.cleaner = TextCleaner()
+            self.use_ebooklib = False
 
         # Create temp directory if needed
         self.temp_dir = Path(config.processing.temp_dir)
@@ -80,9 +92,6 @@ class EPUBProcessor:
         Returns:
             ProcessingResult with all extracted and processed data
         """
-        import time
-        start_time = time.time()
-
         logger.info(f"Starting EPUB processing: {epub_path}")
 
         if not epub_path.exists():
@@ -98,16 +107,36 @@ class EPUBProcessor:
                 error_message=error_msg
             )
 
+        # Delegate to the appropriate processor
+        if self.use_ebooklib:
+            return self.processor.process_epub(epub_path, output_dir)
+        else:
+            return self._process_epub_pandoc(epub_path, output_dir)
+
+    def _process_epub_pandoc(self, epub_path: Path, output_dir: Optional[Path] = None) -> ProcessingResult:
+        """
+        Process EPUB file using Pandoc (legacy method).
+
+        Args:
+            epub_path: Path to EPUB file
+            output_dir: Optional output directory for results
+
+        Returns:
+            ProcessingResult with all extracted and processed data
+        """
+        import time
+        start_time = time.time()
+
         temp_media_dir = None
 
         try:
             # Step 1: Extract metadata
             logger.info("Extracting metadata...")
-            metadata = self.pandoc.extract_metadata(epub_path)
+            metadata = self.processor.extract_metadata(epub_path)
 
             # Step 2: Convert to markdown
             logger.info("Converting EPUB to markdown...")
-            markdown_content, temp_media_dir = self.pandoc.extract_to_markdown(
+            markdown_content, temp_media_dir = self.processor.extract_to_markdown(
                 epub_path,
                 extract_images=self.config.image_description.enabled
             )
@@ -116,7 +145,7 @@ class EPUBProcessor:
             image_info = []
             if self.config.image_description.enabled:
                 logger.info("Extracting image information...")
-                image_info = self.pandoc.extract_images_info(epub_path)
+                image_info = self.processor.extract_images_info(epub_path)
 
             # Step 4: Clean text
             logger.info("Cleaning text...")
@@ -389,38 +418,41 @@ class EPUBProcessor:
         Returns:
             List of validation issues (empty if valid)
         """
-        issues = []
+        if self.use_ebooklib:
+            return self.processor.validate_epub(epub_path)
+        else:
+            issues = []
 
-        # Check file exists
-        if not epub_path.exists():
-            issues.append(f"File does not exist: {epub_path}")
+            # Check file exists
+            if not epub_path.exists():
+                issues.append(f"File does not exist: {epub_path}")
+                return issues
+
+            # Check file extension
+            if epub_path.suffix.lower() != '.epub':
+                issues.append(f"File does not have .epub extension: {epub_path}")
+
+            # Check file size
+            try:
+                file_size = epub_path.stat().st_size
+                if file_size == 0:
+                    issues.append("File is empty")
+                elif file_size < 1024:  # Less than 1KB
+                    issues.append("File is suspiciously small")
+            except Exception as e:
+                issues.append(f"Cannot read file stats: {e}")
+
+            # Try to extract metadata to validate format
+            try:
+                metadata = self.processor.extract_metadata(epub_path)
+                if not metadata:
+                    issues.append("No metadata found - file may be corrupted")
+            except PandocError as e:
+                issues.append(f"Pandoc validation failed: {e}")
+            except Exception as e:
+                issues.append(f"Unexpected validation error: {e}")
+
             return issues
-
-        # Check file extension
-        if epub_path.suffix.lower() != '.epub':
-            issues.append(f"File does not have .epub extension: {epub_path}")
-
-        # Check file size
-        try:
-            file_size = epub_path.stat().st_size
-            if file_size == 0:
-                issues.append("File is empty")
-            elif file_size < 1024:  # Less than 1KB
-                issues.append("File is suspiciously small")
-        except Exception as e:
-            issues.append(f"Cannot read file stats: {e}")
-
-        # Try to extract metadata to validate format
-        try:
-            metadata = self.pandoc.extract_metadata(epub_path)
-            if not metadata:
-                issues.append("No metadata found - file may be corrupted")
-        except PandocError as e:
-            issues.append(f"Pandoc validation failed: {e}")
-        except Exception as e:
-            issues.append(f"Unexpected validation error: {e}")
-
-        return issues
 
     def get_processing_info(self, epub_path: Path) -> Dict[str, Any]:
         """
@@ -432,39 +464,42 @@ class EPUBProcessor:
         Returns:
             Dictionary with basic information
         """
-        try:
-            # Get file stats
-            file_stats = epub_path.stat()
+        if self.use_ebooklib:
+            return self.processor.get_processing_info(epub_path)
+        else:
+            try:
+                # Get file stats
+                file_stats = epub_path.stat()
 
-            # Get metadata
-            metadata = self.pandoc.extract_metadata(epub_path)
+                # Get metadata
+                metadata = self.processor.extract_metadata(epub_path)
 
-            # Quick text extraction for size estimation
-            markdown_content, temp_media_dir = self.pandoc.extract_to_markdown(
-                epub_path, extract_images=False
-            )
+                # Quick text extraction for size estimation
+                markdown_content, temp_media_dir = self.processor.extract_to_markdown(
+                    epub_path, extract_images=False
+                )
 
-            # Cleanup temp directory
-            if temp_media_dir and temp_media_dir.exists():
-                shutil.rmtree(temp_media_dir)
+                # Cleanup temp directory
+                if temp_media_dir and temp_media_dir.exists():
+                    shutil.rmtree(temp_media_dir)
 
-            # Estimate processing metrics
-            text_length = len(markdown_content)
-            estimated_words = len(markdown_content.split())
-            estimated_processing_time = text_length / 10000  # Rough estimate
+                # Estimate processing metrics
+                text_length = len(markdown_content)
+                estimated_words = len(markdown_content.split())
+                estimated_processing_time = text_length / 10000  # Rough estimate
 
-            info = {
-                'file_size': file_stats.st_size,
-                'file_modified': file_stats.st_mtime,
-                'metadata': metadata,
-                'estimated_text_length': text_length,
-                'estimated_word_count': estimated_words,
-                'estimated_processing_time': estimated_processing_time,
-                'estimated_audio_duration': estimated_words / 200.0  # minutes
-            }
+                info = {
+                    'file_size': file_stats.st_size,
+                    'file_modified': file_stats.st_mtime,
+                    'metadata': metadata,
+                    'estimated_text_length': text_length,
+                    'estimated_word_count': estimated_words,
+                    'estimated_processing_time': estimated_processing_time,
+                    'estimated_audio_duration': estimated_words / 200.0  # minutes
+                }
 
-            return info
+                return info
 
-        except Exception as e:
-            logger.error(f"Error getting EPUB info: {e}")
-            return {'error': str(e)}
+            except Exception as e:
+                logger.error(f"Error getting EPUB info: {e}")
+                return {'error': str(e)}
