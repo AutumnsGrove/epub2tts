@@ -493,7 +493,42 @@ class MLXKokoroModel:
                         voice=voice,
                         speed=speed
                     )
-                    logger.debug("MLX-Audio synthesis successful")
+
+                    # MLX-Audio may return None and save to file instead
+                    if audio_data is None:
+                        logger.debug("MLX-Audio returned None, looking for generated file")
+                        import glob
+                        import os
+                        import time
+
+                        # Look for recently created audio files
+                        audio_files = glob.glob("audio_*.wav")
+                        if audio_files:
+                            latest_file = max(audio_files, key=os.path.getctime)
+                            # Check if file was created recently (within last 10 seconds)
+                            if time.time() - os.path.getctime(latest_file) < 10:
+                                logger.debug(f"Loading audio from MLX-Audio generated file: {latest_file}")
+                                import soundfile as sf
+                                audio_data, sample_rate = sf.read(latest_file)
+                                logger.debug(f"Loaded audio: {audio_data.shape}, {sample_rate}Hz")
+                                # Clean up the temporary file
+                                try:
+                                    os.remove(latest_file)
+                                    logger.debug(f"Cleaned up temporary file: {latest_file}")
+                                except:
+                                    pass
+                            else:
+                                logger.warning("Found audio file but it's not recent enough")
+                                audio_data = None
+                        else:
+                            logger.warning("MLX-Audio returned None and no audio files found")
+                            audio_data = None
+
+                    if audio_data is not None:
+                        logger.debug("MLX-Audio synthesis successful")
+                    else:
+                        raise RuntimeError("MLX-Audio failed to generate audio data")
+
                 except (SystemExit, RuntimeError, Exception) as e:
                     logger.warning(f"MLX-Audio failed ({type(e).__name__}: {e}), falling back to direct Kokoro")
                     # Switch to direct Kokoro for this and future calls
@@ -507,7 +542,10 @@ class MLXKokoroModel:
 
                     # Use direct Kokoro pipeline
                     logger.debug(f"Using direct Kokoro for: '{text[:50]}...'")
-                    audio_data = self.pipeline.synthesize(text, voice=voice)
+                    voice_pack = self.pipeline.load_voice(voice)
+                    ps, tokens = self.pipeline.g2p(text)
+                    output = self.pipeline.infer(self.pipeline.model, ps, voice_pack)
+                    audio_data = output.audio.numpy() if hasattr(output.audio, 'numpy') else output.audio
 
                     # Adjust speed if needed
                     if speed != 1.0:
@@ -516,7 +554,10 @@ class MLXKokoroModel:
             else:
                 # Use direct Kokoro pipeline
                 logger.debug(f"Using direct Kokoro: '{text[:50]}...'")
-                audio_data = self.pipeline.synthesize(text, voice=voice)
+                voice_pack = self.pipeline.load_voice(voice)
+                ps, tokens = self.pipeline.g2p(text)
+                output = self.pipeline.infer(self.pipeline.model, ps, voice_pack)
+                audio_data = output.audio.numpy() if hasattr(output.audio, 'numpy') else output.audio
 
                 # Adjust speed if needed (simple time-stretch)
                 if speed != 1.0:

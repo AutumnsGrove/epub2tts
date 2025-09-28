@@ -11,8 +11,8 @@ import soundfile as sf
 # Add src to path to import modules
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
-from pipelines.tts_pipeline import TTSPipeline, MLXKokoroModel
-from config.config_loader import load_config
+from pipelines.tts_pipeline import KokoroTTSPipeline, MLXKokoroModel
+from utils.config import TTSConfig, load_config
 
 def test_config_loading():
     """Test configuration loading."""
@@ -96,30 +96,25 @@ def test_tts_pipeline_integration(config):
     print("\n🔍 Testing TTS Pipeline Integration...")
 
     try:
-        pipeline = TTSPipeline(config.tts)
+        pipeline = KokoroTTSPipeline(config.tts)
         print(f"  ✅ TTS Pipeline initialized")
 
         # Test pipeline info
-        info = pipeline.get_info()
+        info = pipeline.get_voice_info()
         print(f"    - Current voice: {info['current_voice']}")
         print(f"    - Available voices: {len(info['available_voices'])} voices")
         print(f"    - Sample rate: {info['sample_rate']}")
 
         # Test synthesis through pipeline
         test_text = "The TTS pipeline is working correctly with Kokoro."
-        audio_data = pipeline.synthesize(test_text)
+        result = pipeline.process_chunk(test_text, "test_pipeline_output.wav")
 
-        if isinstance(audio_data, np.ndarray) and len(audio_data) > 0:
-            duration = len(audio_data) / info['sample_rate']
-            print(f"  ✅ Pipeline synthesis successful: {len(audio_data)} samples ({duration:.2f}s)")
-
-            # Save pipeline test audio
-            sf.write("test_pipeline_output.wav", audio_data, info['sample_rate'])
-            print(f"    - Saved to: test_pipeline_output.wav")
-
+        if result.success and result.audio_path:
+            print(f"  ✅ Pipeline synthesis successful: {result.duration:.2f}s audio")
+            print(f"    - Saved to: {result.audio_path}")
             return True
         else:
-            print(f"  ❌ Pipeline synthesis failed: invalid audio data")
+            print(f"  ❌ Pipeline synthesis failed: {result.error_message}")
             return False
 
     except Exception as e:
