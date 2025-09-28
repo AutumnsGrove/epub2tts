@@ -201,9 +201,9 @@ class KokoroTTSPipeline:
         results = []
         progress = ProgressLogger("TTS processing", len(text_chunks))
 
-        if parallel and len(text_chunks) > 1:
-            # Parallel processing
-            max_workers = min(4, len(text_chunks))  # Limit workers for memory
+        if parallel and len(text_chunks) > 1 and not getattr(self.model, 'force_sequential', False):
+            # Parallel processing (only if model allows it)
+            max_workers = min(2, len(text_chunks))  # Reduced for Metal stability
             with ThreadPoolExecutor(max_workers=max_workers) as executor:
                 # Submit all tasks
                 future_to_chunk = {}
@@ -522,14 +522,24 @@ class MLXKokoroModel:
         """Clean up Metal/GPU resources to prevent framework errors."""
         try:
             import gc
-            gc.collect()
 
             # Try to clear MLX memory if available
             try:
                 import mlx.core as mx
-                mx.eval([])  # Force evaluation to clear cache
-            except (ImportError, AttributeError):
-                pass
+                # Force synchronization before cleanup
+                mx.eval([])
+                # Clear any pending operations
+                mx.metal.clear_cache()
+                # Small delay to allow Metal framework to finish pending operations
+                time.sleep(0.1)
+            except (ImportError, AttributeError) as e:
+                logger.debug(f"MLX memory cleanup not available: {e}")
+
+            # Force garbage collection
+            gc.collect()
+
+            # Additional delay for Metal framework stability
+            time.sleep(0.05)
 
         except Exception as e:
             logger.debug(f"Resource cleanup warning: {e}")
@@ -537,9 +547,17 @@ class MLXKokoroModel:
     def _handle_metal_error(self, error: Exception) -> bool:
         """Handle Metal framework specific errors."""
         error_str = str(error)
-        if "MTLCommandBuffer" in error_str or "Metal" in error_str:
-            logger.error("Metal framework error detected, degrading performance level")
+        metal_keywords = ["MTLCommandBuffer", "Metal", "failed assertion", "Completed handler", "commit call"]
+
+        if any(keyword in error_str for keyword in metal_keywords):
+            logger.error(f"Metal framework error detected: {error_str[:100]}...")
             self.metal_error_count += 1
+
+            # Immediate cleanup on Metal errors
+            try:
+                self._cleanup_metal_resources()
+            except:
+                pass
 
             if self.metal_error_count >= 2:
                 self.degradation_level = 2  # Switch to mock
