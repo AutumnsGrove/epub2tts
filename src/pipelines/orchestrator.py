@@ -11,6 +11,8 @@ from typing import Dict, List, Optional, Any
 from dataclasses import dataclass, asdict
 import time
 import json
+import concurrent.futures
+import threading
 
 from core.epub_processor import EPUBProcessor, ProcessingResult
 from core.text_cleaner import Chapter
@@ -117,59 +119,61 @@ class PipelineOrchestrator(LoggerMixin):
             stage_times['epub_processing'] = time.time() - stage_start
             self.logger.info(f"EPUB processing completed: {len(epub_result.chapters)} chapters")
 
-            # Stage 2: Image Description (if enabled and images found)
+            # Stage 2 & 3: Parallel Image Processing and TTS Generation
             image_descriptions = []
-            if enable_images and self.image_pipeline and epub_result.image_info:
-                stage_start = time.time()
+            tts_results = None
 
-                # Ensure images have been copied to permanent location
-                # Wait a moment for any file operations to complete
-                import time
-                time.sleep(0.1)
+            # Prepare parallel tasks
+            futures = {}
 
-                # Validate that image files exist before processing
-                valid_image_info = []
-                for image_info in epub_result.image_info:
-                    image_path = image_info.get('file_path', '')
-                    if image_path and Path(image_path).exists():
-                        valid_image_info.append(image_info)
-                        self.logger.debug(f"Validated image path: {image_path}")
-                    else:
-                        self.logger.warning(f"Image file not found: {image_path}")
-
-                if valid_image_info:
-                    with PerformanceLogger("Image description generation"):
-                        image_result = self.image_pipeline.batch_process_images(
-                            valid_image_info,
-                            parallel=True
-                        )
-                        if image_result.success:
-                            image_descriptions = image_result.descriptions
-                            self.logger.info(f"Image processing completed: {len(image_descriptions)} descriptions")
-                        else:
-                            self.logger.warning("Image processing failed")
-                else:
-                    self.logger.warning("No valid image files found for processing")
-
-                stage_times['image_processing'] = time.time() - stage_start
-
-                # Integrate image descriptions into text
-                if image_descriptions:
-                    epub_result = self._integrate_image_descriptions(
-                        epub_result,
-                        image_descriptions
+            with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
+                # Start image processing if enabled
+                if enable_images and self.image_pipeline and epub_result.image_info:
+                    self.logger.info("🖼️  Starting image processing in parallel...")
+                    futures['images'] = executor.submit(
+                        self._process_images_parallel,
+                        epub_result.image_info
                     )
 
-            # Stage 3: TTS Generation (if enabled)
-            tts_results = None
-            if enable_tts and self.tts_pipeline:
-                stage_start = time.time()
-                with PerformanceLogger("TTS audio generation"):
-                    tts_results = self._generate_tts_audio(
+                # Start TTS generation if enabled
+                if enable_tts and self.tts_pipeline:
+                    self.logger.info("🔊 Starting TTS generation in parallel...")
+                    futures['tts'] = executor.submit(
+                        self._generate_tts_audio_parallel,
                         epub_result.chapters,
                         output_dir
                     )
-                stage_times['tts_generation'] = time.time() - stage_start
+
+                # Wait for both tasks to complete and collect results
+                if 'images' in futures:
+                    try:
+                        image_result = futures['images'].result()
+                        if image_result['success']:
+                            image_descriptions = image_result['descriptions']
+                            self.logger.info(f"✅ Image processing completed: {len(image_descriptions)} descriptions")
+                        stage_times['image_processing'] = image_result['processing_time']
+                    except Exception as e:
+                        self.logger.error(f"Image processing failed: {e}")
+                        stage_times['image_processing'] = 0
+
+                if 'tts' in futures:
+                    try:
+                        tts_result = futures['tts'].result()
+                        if tts_result['success']:
+                            tts_results = tts_result['results']
+                            self.logger.info("✅ TTS generation completed")
+                        stage_times['tts_generation'] = tts_result['processing_time']
+                    except Exception as e:
+                        self.logger.error(f"TTS generation failed: {e}")
+                        stage_times['tts_generation'] = 0
+
+            # Integrate image descriptions into text if available
+            if image_descriptions:
+                self.logger.info("🔗 Integrating image descriptions into text...")
+                epub_result = self._integrate_image_descriptions(
+                    epub_result,
+                    image_descriptions
+                )
 
             # Stage 4: Final output and metadata
             stage_start = time.time()
@@ -296,6 +300,104 @@ class PipelineOrchestrator(LoggerMixin):
 
         self.logger.info(f"Integrated {len(desc_map)} image descriptions into text")
         return updated_result
+
+    def _process_images_parallel(self, image_info_list: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """
+        Process images in parallel - wrapper for use with ThreadPoolExecutor.
+
+        Args:
+            image_info_list: List of image information dictionaries
+
+        Returns:
+            Dictionary with success status, descriptions, and processing time
+        """
+        start_time = time.time()
+
+        try:
+            # Ensure images have been copied to permanent location
+            # Wait a moment for any file operations to complete
+            time.sleep(0.1)
+
+            # Validate that image files exist before processing
+            valid_image_info = []
+            for image_info in image_info_list:
+                image_path = image_info.get('file_path', '')
+                if image_path and Path(image_path).exists():
+                    valid_image_info.append(image_info)
+                    self.logger.debug(f"Validated image path: {image_path}")
+                else:
+                    self.logger.warning(f"Image file not found: {image_path}")
+
+            if not valid_image_info:
+                self.logger.warning("No valid image files found for processing")
+                return {
+                    'success': False,
+                    'descriptions': [],
+                    'processing_time': time.time() - start_time
+                }
+
+            # Process images
+            with PerformanceLogger("Image description generation"):
+                image_result = self.image_pipeline.batch_process_images(
+                    valid_image_info,
+                    parallel=True
+                )
+
+                if image_result.success:
+                    return {
+                        'success': True,
+                        'descriptions': image_result.descriptions,
+                        'processing_time': time.time() - start_time
+                    }
+                else:
+                    return {
+                        'success': False,
+                        'descriptions': [],
+                        'processing_time': time.time() - start_time
+                    }
+
+        except Exception as e:
+            self.logger.error(f"Image processing error: {e}", exc_info=True)
+            return {
+                'success': False,
+                'descriptions': [],
+                'processing_time': time.time() - start_time
+            }
+
+    def _generate_tts_audio_parallel(
+        self,
+        chapters: List[Chapter],
+        output_dir: Path
+    ) -> Dict[str, Any]:
+        """
+        Generate TTS audio in parallel - wrapper for use with ThreadPoolExecutor.
+
+        Args:
+            chapters: List of chapters to process
+            output_dir: Output directory for audio files
+
+        Returns:
+            Dictionary with success status, results, and processing time
+        """
+        start_time = time.time()
+
+        try:
+            with PerformanceLogger("TTS audio generation"):
+                tts_results = self._generate_tts_audio(chapters, output_dir)
+
+                return {
+                    'success': tts_results is not None,
+                    'results': tts_results,
+                    'processing_time': time.time() - start_time
+                }
+
+        except Exception as e:
+            self.logger.error(f"TTS generation error: {e}", exc_info=True)
+            return {
+                'success': False,
+                'results': None,
+                'processing_time': time.time() - start_time
+            }
 
     def _generate_tts_audio(
         self,
