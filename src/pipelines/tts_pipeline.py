@@ -7,6 +7,7 @@ using the Kokoro TTS model with advanced features and optimizations.
 
 import logging
 import numpy as np
+import re
 from pathlib import Path
 from typing import Dict, List, Optional, Any, Union
 from dataclasses import dataclass
@@ -85,12 +86,11 @@ class KokoroTTSPipeline:
                     self.model = MLXKokoroModel(self.config)
                     logger.info("Using MLX-optimized Kokoro model")
                 except (ImportError, RuntimeError) as e:
-                    logger.warning(f"MLX Kokoro not available: {e}")
-                    logger.info("Falling back to mock TTS for development")
-                    self.model = MockKokoroModel(self.config)
+                    logger.error(f"MLX Kokoro not available: {e}")
+                    raise RuntimeError("TTS model unavailable - MLX Kokoro failed to load")
             else:
-                logger.info("MLX disabled in config, using mock TTS for development")
-                self.model = MockKokoroModel(self.config)
+                logger.error("MLX disabled in config - TTS requires MLX")
+                raise RuntimeError("TTS model unavailable - MLX is required but disabled")
 
             self.is_initialized = True
 
@@ -453,7 +453,6 @@ class KokoroTTSPipeline:
         processed = text
 
         # Handle pause markers
-        import re
         processed = re.sub(r'\[PAUSE: ([\d.]+)\]', r'<break time="\1s"/>', processed)
 
         # Handle emphasis markers
@@ -579,7 +578,7 @@ class MLXKokoroModel:
                 elif self.degradation_level <= 1:
                     return self._try_direct_kokoro(text, voice, speed, pitch)
                 else:
-                    return self._try_mock_synthesis(text, speed)
+                    raise RuntimeError("All TTS methods failed")
 
             except Exception as e:
                 if self._handle_metal_error(e):
@@ -588,15 +587,15 @@ class MLXKokoroModel:
 
                 logger.warning(f"Attempt {attempt + 1} failed: {e}")
                 if attempt == self.max_retries:
-                    logger.error("All synthesis attempts failed, switching to mock model")
-                    return self._try_mock_synthesis(text, speed)
+                    logger.error("All synthesis attempts failed")
+                    raise RuntimeError(f"TTS synthesis failed after {self.max_retries + 1} attempts: {e}")
 
                 # Wait before retry with exponential backoff
                 import time
                 time.sleep(2 ** attempt)
 
         # This shouldn't be reached, but just in case
-        return self._try_mock_synthesis(text, speed)
+        raise RuntimeError("TTS synthesis failed unexpectedly")
 
     def _cleanup_metal_resources(self) -> None:
         """Clean up Metal/GPU resources to prevent framework errors."""
@@ -639,9 +638,8 @@ class MLXKokoroModel:
             except:
                 pass
 
-            if self.metal_error_count >= 2:
-                self.degradation_level = 2  # Switch to mock
-                logger.warning("Multiple Metal errors, switching to mock model")
+            if self.metal_error_count >= 3:
+                raise RuntimeError("Too many Metal framework errors, TTS unavailable")
             else:
                 self.degradation_level = 1  # Switch to direct Kokoro
                 self.use_mlx_audio = False
@@ -730,7 +728,7 @@ class MLXKokoroModel:
                 raise
 
     def _try_direct_kokoro(self, text: str, voice: str, speed: float, pitch: float) -> np.ndarray:
-        """Try direct Kokoro synthesis."""
+        """Try direct Kokoro synthesis with improved text handling."""
         logger.debug(f"Using direct Kokoro: '{text[:50]}...'")
 
         # Initialize direct Kokoro if not already done
@@ -739,10 +737,51 @@ class MLXKokoroModel:
             logger.info("Initializing direct Kokoro pipeline for fallback")
             self.pipeline = KPipeline('a')  # 'a' for autodetect
 
-        voice_pack = self.pipeline.load_voice(voice)
-        ps, tokens = self.pipeline.g2p(text)
-        output = self.pipeline.infer(self.pipeline.model, ps, voice_pack)
-        audio_data = output.audio.numpy() if hasattr(output.audio, 'numpy') else output.audio
+        # Clean and chunk text to avoid tokenization issues
+        cleaned_text = self._clean_text_for_tts(text)
+
+        # Split very long text into smaller chunks to avoid index errors
+        max_chunk_length = 500  # chars
+        if len(cleaned_text) > max_chunk_length:
+            chunks = self._split_text_for_synthesis(cleaned_text, max_chunk_length)
+            audio_segments = []
+
+            for chunk in chunks:
+                if chunk.strip():  # Skip empty chunks
+                    try:
+                        voice_pack = self.pipeline.load_voice(voice)
+                        ps, tokens = self.pipeline.g2p(chunk.strip())
+
+                        # Check if phonemes/tokens are reasonable length
+                        if len(tokens) > 2000:  # Arbitrary safety limit
+                            logger.warning(f"Chunk tokens too long ({len(tokens)}), skipping")
+                            continue
+
+                        output = self.pipeline.infer(self.pipeline.model, ps, voice_pack)
+                        chunk_audio = output.audio.numpy() if hasattr(output.audio, 'numpy') else output.audio
+                        audio_segments.append(chunk_audio)
+                    except IndexError as e:
+                        logger.warning(f"Index error on chunk, skipping: {e}")
+                        continue
+                    except Exception as e:
+                        logger.warning(f"Error processing chunk: {e}")
+                        continue
+
+            if not audio_segments:
+                raise RuntimeError("No audio segments generated successfully")
+
+            # Concatenate audio segments
+            audio_data = np.concatenate(audio_segments)
+        else:
+            voice_pack = self.pipeline.load_voice(voice)
+            ps, tokens = self.pipeline.g2p(cleaned_text)
+
+            # Check if phonemes/tokens are reasonable length
+            if len(tokens) > 2000:  # Arbitrary safety limit
+                raise RuntimeError(f"Text tokens too long ({len(tokens)}) for synthesis")
+
+            output = self.pipeline.infer(self.pipeline.model, ps, voice_pack)
+            audio_data = output.audio.numpy() if hasattr(output.audio, 'numpy') else output.audio
 
         # Adjust speed if needed
         if speed != 1.0:
@@ -755,30 +794,70 @@ class MLXKokoroModel:
 
         return audio_data.astype(np.float32)
 
-    def _try_mock_synthesis(self, text: str, speed: float) -> np.ndarray:
-        """Fallback to mock synthesis when all else fails."""
-        logger.warning("Using mock synthesis as fallback")
+    def _clean_text_for_tts(self, text: str) -> str:
+        """Clean text to avoid TTS tokenization issues."""
 
-        # Generate simple sine wave as mock audio
-        duration = len(text) * 0.05  # 50ms per character
-        sample_rate = self.config.sample_rate
+        # Remove problematic characters that can cause tokenization issues
+        cleaned = text
 
-        # Adjust duration based on speed
-        duration = duration / speed
+        # Remove excessive whitespace
+        cleaned = re.sub(r'\s+', ' ', cleaned)
 
-        t = np.linspace(0, duration, int(sample_rate * duration), False)
+        # Remove or replace problematic punctuation that confuses tokenizers
+        cleaned = re.sub(r'[^\w\s\.\,\!\?\;\:\-\'\"]', ' ', cleaned)
 
-        # Generate a simple tone that varies based on text content
-        frequency = 440 + (hash(text) % 200)  # Vary frequency based on text
-        amplitude = 0.1  # Keep volume low
+        # Remove multiple punctuation marks in a row
+        cleaned = re.sub(r'[\.]{3,}', '...', cleaned)
+        cleaned = re.sub(r'[!]{2,}', '!', cleaned)
+        cleaned = re.sub(r'[\?]{2,}', '?', cleaned)
 
-        audio_data = amplitude * np.sin(2 * np.pi * frequency * t)
+        # Ensure proper spacing around punctuation
+        cleaned = re.sub(r'([\.!?])\s*([A-Z])', r'\1 \2', cleaned)
 
-        # Add some variation to make it less monotonic
-        modulation = 0.1 * np.sin(2 * np.pi * 2 * t)
-        audio_data = audio_data * (1 + modulation)
+        # Remove leading/trailing whitespace
+        cleaned = cleaned.strip()
 
-        return audio_data.astype(np.float32)
+        return cleaned
+
+    def _split_text_for_synthesis(self, text: str, max_length: int) -> List[str]:
+        """Split text into smaller chunks for synthesis."""
+
+        chunks = []
+        current_chunk = ""
+
+        # Split by sentences first
+        sentences = re.split(r'(?<=[.!?])\s+', text)
+
+        for sentence in sentences:
+            # If adding this sentence would exceed max length, start new chunk
+            if len(current_chunk) + len(sentence) + 1 > max_length:
+                if current_chunk:
+                    chunks.append(current_chunk.strip())
+                    current_chunk = sentence
+                else:
+                    # Sentence itself is too long, split by words
+                    words = sentence.split()
+                    temp_chunk = ""
+                    for word in words:
+                        if len(temp_chunk) + len(word) + 1 > max_length:
+                            if temp_chunk:
+                                chunks.append(temp_chunk.strip())
+                                temp_chunk = word
+                            else:
+                                # Word itself is too long, truncate it
+                                chunks.append(word[:max_length])
+                        else:
+                            temp_chunk += " " + word if temp_chunk else word
+                    if temp_chunk:
+                        current_chunk = temp_chunk
+            else:
+                current_chunk += " " + sentence if current_chunk else sentence
+
+        # Add final chunk if exists
+        if current_chunk:
+            chunks.append(current_chunk.strip())
+
+        return [chunk for chunk in chunks if chunk.strip()]
 
     def get_available_voices(self) -> List[str]:
         """Get list of available voices."""
@@ -792,90 +871,6 @@ class MLXKokoroModel:
             pass
 
         # Default voices list
-        return ["bf_lily", "af_heart", "bf_emma", "am_adam", "af_sarah", "bf_grace"]
-
-
-class MockKokoroModel:
-    """Mock Kokoro model for development and testing."""
-
-    def __init__(self, config: TTSConfig):
-        """Initialize mock model."""
-        self.config = config
-        logger.info("Initialized mock Kokoro model for development")
-
-    def synthesize(
-        self,
-        text: str,
-        voice: str = "bf_lily",
-        speed: float = 1.0,
-        pitch: float = 1.0
-    ) -> np.ndarray:
-        """
-        Generate mock speech-like audio data.
-
-        Args:
-            text: Text to synthesize
-            voice: Voice to use
-            speed: Speech speed
-            pitch: Speech pitch
-
-        Returns:
-            Speech-like audio data as numpy array
-        """
-        # Calculate duration based on typical speech rate (200-250 words per minute)
-        words = len(text.split())
-        chars = len(text)
-
-        # Base duration calculation: ~5 chars per second at normal speed
-        duration = max(chars * 0.08 / speed, 0.5)  # Minimum 0.5 seconds
-
-        sample_rate = self.config.sample_rate
-        t = np.linspace(0, duration, int(sample_rate * duration), False)
-
-        # Generate speech-like formant frequencies
-        base_freq = 100 + (hash(voice) % 50)  # Voice-dependent base frequency
-
-        # Create multiple formants for more natural sound
-        formant1 = base_freq * pitch  # Fundamental frequency
-        formant2 = formant1 * 2.5     # First formant
-        formant3 = formant1 * 4.2     # Second formant
-
-        # Generate speech envelope with natural rhythm
-        # Add rhythm based on text content
-        rhythm_freq = 3 + (chars % 5)  # 3-8 Hz rhythm
-        envelope = 0.5 * (1 + 0.3 * np.sin(2 * np.pi * rhythm_freq * t))
-        envelope *= np.exp(-t * 0.2)  # Natural decay
-
-        # Create speech-like signal with multiple harmonics
-        signal = (
-            0.6 * np.sin(2 * np.pi * formant1 * t) +
-            0.3 * np.sin(2 * np.pi * formant2 * t) +
-            0.1 * np.sin(2 * np.pi * formant3 * t)
-        )
-
-        # Add consonant-like noise bursts
-        noise_factor = 0.1
-        consonant_positions = [i / chars for i, c in enumerate(text)
-                             if c.lower() in 'bcdfghjklmnpqrstvwxyz']
-
-        for pos in consonant_positions:
-            noise_start = int(pos * len(t))
-            noise_end = min(noise_start + int(0.02 * sample_rate), len(t))
-            if noise_start < len(t):
-                noise = noise_factor * np.random.normal(0, 1, noise_end - noise_start)
-                signal[noise_start:noise_end] += noise
-
-        # Apply envelope and normalize
-        audio_data = signal * envelope
-
-        # Normalize to prevent clipping while keeping reasonable volume
-        if np.max(np.abs(audio_data)) > 0:
-            audio_data = 0.3 * audio_data / np.max(np.abs(audio_data))
-
-        return audio_data.astype(np.float32)
-
-    def get_available_voices(self) -> List[str]:
-        """Get list of available voices."""
         return ["bf_lily", "af_heart", "bf_emma", "am_adam", "af_sarah", "bf_grace"]
 
 

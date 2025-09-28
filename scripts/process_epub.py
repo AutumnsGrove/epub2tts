@@ -225,8 +225,8 @@ def process_epub(
                 click.echo(f"📄 Text content: {len(result.text_content):,} characters")
                 click.echo(f"📚 Chapters extracted: {len(result.chapters)}")
 
-            if result.image_info:
-                click.echo(f"🖼️  Images processed: {len(result.image_info)}")
+                if result.image_info:
+                    click.echo(f"🖼️  Images processed: {len(result.image_info)}")
 
                 # Show cleaning stats
                 stats = result.cleaning_stats

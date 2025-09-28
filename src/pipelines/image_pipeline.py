@@ -317,7 +317,7 @@ class GemmaVLMModel(BaseVLMModel):
         self.session = None
 
     def load_model(self) -> bool:
-        """Load/test Gemma model connection."""
+        """Load/test Gemma model connection with auto-start capability."""
         try:
             import requests
             self.session = requests.Session()
@@ -326,15 +326,101 @@ class GemmaVLMModel(BaseVLMModel):
             test_response = self.session.get(f"{self.api_url}/v1/models", timeout=10)
             if test_response.status_code == 200:
                 models = test_response.json()
-                logger.info(f"Connected to LM Studio. Available models: {[m.get('id', 'unknown') for m in models.get('data', [])]}")
-                self.is_loaded = True
-                return True
+                available_models = [m.get('id', 'unknown') for m in models.get('data', [])]
+                logger.info(f"Connected to LM Studio. Available models: {available_models}")
+
+                # Check if our model is loaded
+                if self.model_name in available_models:
+                    logger.info(f"Model {self.model_name} is already loaded")
+                    self.is_loaded = True
+                    return True
+                else:
+                    logger.info(f"Model {self.model_name} not loaded, attempting to load...")
+                    return self._load_model_in_lm_studio()
             else:
                 logger.error(f"LM Studio connection failed: {test_response.status_code}")
-                return False
+                logger.info("Attempting to start LM Studio...")
+                return self._start_lm_studio_and_load_model()
 
         except Exception as e:
             logger.error(f"Failed to connect to LM Studio: {e}")
+            logger.info("Attempting to start LM Studio...")
+            return self._start_lm_studio_and_load_model()
+
+    def _load_model_in_lm_studio(self) -> bool:
+        """Attempt to load the model in LM Studio via API."""
+        try:
+            # Try to load the model using LM Studio's load endpoint
+            load_payload = {
+                "model": self.model_name
+            }
+
+            load_response = self.session.post(
+                f"{self.api_url}/v1/models/load",
+                json=load_payload,
+                timeout=60  # Model loading can take time
+            )
+
+            if load_response.status_code == 200:
+                logger.info(f"Successfully loaded model {self.model_name} in LM Studio")
+                self.is_loaded = True
+                return True
+            else:
+                logger.warning(f"Failed to load model via API: {load_response.status_code}")
+                return False
+
+        except Exception as e:
+            logger.warning(f"Failed to load model via API: {e}")
+            return False
+
+    def _start_lm_studio_and_load_model(self) -> bool:
+        """Attempt to start LM Studio and load the model."""
+        try:
+            import subprocess
+            import time
+
+            # Try to start LM Studio (this is platform-specific)
+            logger.info("Attempting to start LM Studio...")
+
+            # Common LM Studio installation paths
+            lm_studio_paths = [
+                "/Applications/LM Studio.app/Contents/MacOS/LM Studio",  # macOS
+                "C:\\Users\\%USERNAME%\\AppData\\Local\\LMStudio\\LM Studio.exe",  # Windows
+                "/usr/local/bin/lmstudio",  # Linux
+                "/opt/lmstudio/lmstudio"   # Linux alternative
+            ]
+
+            started = False
+            for path in lm_studio_paths:
+                try:
+                    subprocess.Popen([path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                    logger.info(f"Started LM Studio from {path}")
+                    started = True
+                    break
+                except (FileNotFoundError, OSError):
+                    continue
+
+            if not started:
+                logger.warning("Could not automatically start LM Studio. Please start it manually.")
+                return False
+
+            # Wait for LM Studio to start
+            logger.info("Waiting for LM Studio to initialize...")
+            for attempt in range(30):  # Wait up to 30 seconds
+                time.sleep(1)
+                try:
+                    test_response = self.session.get(f"{self.api_url}/v1/models", timeout=5)
+                    if test_response.status_code == 200:
+                        logger.info("LM Studio is now running")
+                        return self._load_model_in_lm_studio()
+                except:
+                    continue
+
+            logger.error("LM Studio did not start within 30 seconds")
+            return False
+
+        except Exception as e:
+            logger.error(f"Failed to start LM Studio: {e}")
             return False
 
     def generate_description(
