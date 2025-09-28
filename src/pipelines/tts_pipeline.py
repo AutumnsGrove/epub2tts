@@ -17,8 +17,8 @@ import soundfile as sf
 from pydub import AudioSegment
 from tqdm import tqdm
 
-from ..utils.config import TTSConfig
-from ..utils.logger import PerformanceLogger, ProgressLogger
+from utils.config import TTSConfig
+from utils.logger import PerformanceLogger, ProgressLogger
 
 logger = logging.getLogger(__name__)
 

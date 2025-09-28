@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from pathlib import Path
 import ftfy
 
-from ..utils.config import load_regex_patterns
+from utils.config import load_regex_patterns
 
 logger = logging.getLogger(__name__)
 

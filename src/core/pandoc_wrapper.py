@@ -38,7 +38,34 @@ class PandocConverter:
             PandocError: If pandoc is not found or version is incompatible
         """
         self.pandoc_path = pandoc_path
+
+        # Try system pandoc first, then pypandoc if available
+        if not self._check_pandoc_exists():
+            try:
+                import pypandoc
+                pypandoc_path = pypandoc.get_pandoc_path()
+                if pypandoc_path and Path(pypandoc_path).exists():
+                    self.pandoc_path = pypandoc_path
+                    logger.info(f"Using pypandoc's pandoc at: {pypandoc_path}")
+            except ImportError:
+                pass
+            except Exception as e:
+                logger.debug(f"Could not get pypandoc path: {e}")
+
         self.verify_pandoc_installation()
+
+    def _check_pandoc_exists(self) -> bool:
+        """Check if pandoc exists at the given path."""
+        try:
+            subprocess.run(
+                [self.pandoc_path, "--version"],
+                capture_output=True,
+                check=False,
+                timeout=5
+            )
+            return True
+        except (FileNotFoundError, subprocess.TimeoutExpired):
+            return False
 
     def verify_pandoc_installation(self) -> None:
         """

@@ -12,12 +12,12 @@ from dataclasses import dataclass, asdict
 import time
 import json
 
-from ..core.epub_processor import EPUBProcessor, ProcessingResult
-from ..core.text_cleaner import Chapter
-from .tts_pipeline import KokoroTTSPipeline, TTSResult, create_tts_pipeline
-from .image_pipeline import ImageDescriptionPipeline, ImageDescription, create_image_pipeline
-from ..utils.config import Config
-from ..utils.logger import PerformanceLogger, LoggerMixin
+from core.epub_processor import EPUBProcessor, ProcessingResult
+from core.text_cleaner import Chapter
+from pipelines.tts_pipeline import KokoroTTSPipeline, TTSResult, create_tts_pipeline
+from pipelines.image_pipeline import ImageDescriptionPipeline, ImageDescription, create_image_pipeline
+from utils.config import Config
+from utils.logger import PerformanceLogger, LoggerMixin
 
 logger = logging.getLogger(__name__)
 

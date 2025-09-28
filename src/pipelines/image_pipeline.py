@@ -17,8 +17,8 @@ import pickle
 from PIL import Image
 import numpy as np
 
-from ..utils.config import ImageConfig
-from ..utils.logger import PerformanceLogger, ProgressLogger
+from utils.config import ImageConfig
+from utils.logger import PerformanceLogger, ProgressLogger
 
 logger = logging.getLogger(__name__)
 

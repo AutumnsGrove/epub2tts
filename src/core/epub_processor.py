@@ -13,9 +13,9 @@ from dataclasses import dataclass, asdict
 import json
 import shutil
 
-from .pandoc_wrapper import PandocConverter, PandocError
-from .text_cleaner import TextCleaner, Chapter, CleaningStats
-from ..utils.config import Config
+from core.pandoc_wrapper import PandocConverter, PandocError
+from core.text_cleaner import TextCleaner, Chapter, CleaningStats
+from utils.config import Config
 
 logger = logging.getLogger(__name__)
 
@@ -138,7 +138,8 @@ class EPUBProcessor:
                     cleaned_text,
                     chapters,
                     metadata,
-                    image_info
+                    image_info,
+                    temp_media_dir
                 )
 
             processing_time = time.time() - start_time
@@ -253,7 +254,8 @@ class EPUBProcessor:
         text_content: str,
         chapters: List[Chapter],
         metadata: Dict[str, Any],
-        image_info: List[Dict[str, Any]]
+        image_info: List[Dict[str, Any]],
+        temp_media_dir: Optional[Path] = None
     ) -> None:
         """
         Save processing results to output directory.
@@ -314,6 +316,26 @@ class EPUBProcessor:
                     f.write(f"Chapter {chapter.chapter_num}: {chapter.title}\n")
                     f.write(f"  Words: {chapter.word_count}\n")
                     f.write(f"  Estimated duration: {chapter.estimated_duration:.1f} minutes\n\n")
+
+        # Copy images if they were extracted
+        if temp_media_dir and temp_media_dir.exists() and image_info:
+            images_dir = output_dir / f"{base_name}_images"
+            images_dir.mkdir(exist_ok=True)
+
+            # Look for images in the media directory
+            media_files = list(temp_media_dir.glob("**/*"))
+            image_extensions = {'.png', '.jpg', '.jpeg', '.gif', '.svg', '.webp', '.bmp'}
+
+            copied_count = 0
+            for media_file in media_files:
+                if media_file.is_file() and media_file.suffix.lower() in image_extensions:
+                    dest_file = images_dir / media_file.name
+                    shutil.copy2(media_file, dest_file)
+                    copied_count += 1
+                    logger.debug(f"Copied image: {media_file.name}")
+
+            if copied_count > 0:
+                logger.info(f"Copied {copied_count} images to {images_dir}")
 
         logger.info(f"Results saved to {output_dir}")
 
