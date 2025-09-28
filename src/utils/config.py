@@ -82,6 +82,10 @@ class ImageConfig:
     max_description_length: int = 100
     include_context: bool = True
 
+    # Auto-loading settings
+    auto_load_timeout: int = 10
+    skip_if_not_loaded: bool = False
+
 
 @dataclass
 class OutputConfig:

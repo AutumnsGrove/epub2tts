@@ -309,12 +309,15 @@ class LLaVAModel(BaseVLMModel):
 class GemmaVLMModel(BaseVLMModel):
     """Gemma-3n-e4b Vision-Language Model via LM Studio API."""
 
-    def __init__(self, model_name: str = "gemma-3n-e4b", api_url: str = "http://127.0.0.1:1234"):
+    def __init__(self, model_name: str = "gemma-3n-e4b", api_url: str = "http://127.0.0.1:1234",
+                 auto_load_timeout: int = 10, skip_if_not_loaded: bool = False):
         """Initialize Gemma VLM model."""
         super().__init__(model_name)
         self.api_url = api_url.rstrip('/')
         self.api_endpoint = f"{self.api_url}/v1/chat/completions"
         self.session = None
+        self.auto_load_timeout = auto_load_timeout
+        self.skip_if_not_loaded = skip_if_not_loaded
 
     def load_model(self) -> bool:
         """Load/test Gemma model connection with auto-start capability."""
@@ -404,9 +407,10 @@ class GemmaVLMModel(BaseVLMModel):
                 logger.warning("Could not automatically start LM Studio. Please start it manually.")
                 return False
 
-            # Wait for LM Studio to start
-            logger.info("Waiting for LM Studio to initialize...")
-            for attempt in range(30):  # Wait up to 30 seconds
+            # Wait for LM Studio to start (configurable timeout)
+            timeout_seconds = getattr(self, 'auto_load_timeout', 10)
+            logger.info(f"Waiting for LM Studio to initialize (timeout: {timeout_seconds}s)...")
+            for attempt in range(timeout_seconds):
                 time.sleep(1)
                 try:
                     test_response = self.session.get(f"{self.api_url}/v1/models", timeout=5)
@@ -416,7 +420,7 @@ class GemmaVLMModel(BaseVLMModel):
                 except:
                     continue
 
-            logger.error("LM Studio did not start within 30 seconds")
+            logger.error(f"LM Studio did not start within {timeout_seconds} seconds")
             return False
 
         except Exception as e:
@@ -626,7 +630,9 @@ class ImageDescriptionPipeline:
             if "gemma" in model_name:
                 # Initialize Gemma model with LM Studio
                 api_url = getattr(self.config, 'api_url', 'http://127.0.0.1:1234')
-                self.model = GemmaVLMModel(self.config.model, api_url)
+                auto_load_timeout = getattr(self.config, 'auto_load_timeout', 10)
+                skip_if_not_loaded = getattr(self.config, 'skip_if_not_loaded', False)
+                self.model = GemmaVLMModel(self.config.model, api_url, auto_load_timeout, skip_if_not_loaded)
                 logger.info("Initializing Gemma VLM model via LM Studio")
             elif "llava" in model_name:
                 self.model = LLaVAModel(self.config.model, self.config.model_path)
@@ -638,7 +644,11 @@ class ImageDescriptionPipeline:
             if self.model.load_model():
                 logger.info(f"VLM model loaded successfully: {self.config.model}")
             else:
-                logger.error("Failed to load VLM model")
+                skip_if_not_loaded = getattr(self.config, 'skip_if_not_loaded', False)
+                if skip_if_not_loaded:
+                    logger.warning("Failed to load VLM model, but skip_if_not_loaded=True. Image processing will be skipped.")
+                else:
+                    logger.error("Failed to load VLM model")
                 self.model = None
 
         except Exception as e:

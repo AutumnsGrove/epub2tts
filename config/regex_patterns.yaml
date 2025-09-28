@@ -24,7 +24,7 @@ cleaning_rules:
   transform:
     - pattern: '^#{1,6}\s+(.+)$'  # Markdown headers
       name: chapter_titles
-      replacement: '\n\n[CHAPTER_START: \1]\n\n'
+      replacement: '\n\n[CHAPTER_START: \1][HEADER_END]\n\n'
       multiline: true
 
     - pattern: '!\[([^\]]*)\]\([^\)]+\)'  # Markdown images
@@ -71,6 +71,7 @@ cleaning_rules:
 # Pause insertion rules
 pause_rules:
   chapter_start: 2.0
+  header_end: 1.0      # Pause after headers (h1-h6)
   paragraph_end: 0.5
   question_end: 0.3
   exclamation_end: 0.2

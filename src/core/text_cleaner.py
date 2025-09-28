@@ -284,6 +284,7 @@ class TextCleaner:
 
         Rules:
         - After chapter titles: [PAUSE: 2.0]
+        - After headers (h1-h6): [PAUSE: 1.0]
         - After paragraphs: [PAUSE: 0.5]
         - After sentences ending with "?": [PAUSE: 0.3]
         - After sentences ending with "!": [PAUSE: 0.2]
@@ -329,6 +330,14 @@ class TextCleaner:
         text = re.sub(
             r'\[DIALOGUE_END\]',
             rf'[DIALOGUE_END][PAUSE: {dialogue_pause}]',
+            text
+        )
+
+        # Header end pauses
+        header_pause = pause_rules.get('header_end', 1.0)
+        text = re.sub(
+            r'\[HEADER_END\]',
+            rf'[PAUSE: {header_pause}]',
             text
         )
 
