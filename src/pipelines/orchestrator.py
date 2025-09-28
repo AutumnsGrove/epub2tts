@@ -21,6 +21,7 @@ from pipelines.image_pipeline import ImageDescriptionPipeline, ImageDescription,
 from utils.config import Config
 from utils.logger import PerformanceLogger, LoggerMixin
 from ui.progress_tracker import ProgressTracker
+from ui import TerminalUIManager, UIConfig, create_ui_manager
 
 logger = logging.getLogger(__name__)
 
@@ -51,16 +52,18 @@ class PipelineOrchestrator(LoggerMixin):
     Orchestrates the complete epub2tts processing pipeline.
     """
 
-    def __init__(self, config: Config, progress_tracker: Optional[ProgressTracker] = None):
+    def __init__(self, config: Config, progress_tracker: Optional[ProgressTracker] = None, ui_manager: Optional[TerminalUIManager] = None):
         """
         Initialize pipeline orchestrator.
 
         Args:
             config: Application configuration
             progress_tracker: Optional progress tracking system
+            ui_manager: Optional terminal UI manager for user interface
         """
         self.config = config
         self.progress_tracker = progress_tracker
+        self.ui_manager = ui_manager
         self.epub_processor = EPUBProcessor(config)
 
         # Initialize pipelines based on configuration
@@ -578,6 +581,22 @@ class PipelineOrchestrator(LoggerMixin):
                 f.write("\n")
 
             f.write("✅ Processing completed successfully!\n")
+
+    def start_ui(self) -> bool:
+        """
+        Start the UI manager if available.
+
+        Returns:
+            True if UI was started successfully, False otherwise
+        """
+        if self.ui_manager and not self.ui_manager.is_running:
+            return self.ui_manager.start()
+        return False
+
+    def stop_ui(self) -> None:
+        """Stop the UI manager if running."""
+        if self.ui_manager and self.ui_manager.is_running:
+            self.ui_manager.stop()
 
     def cleanup(self) -> None:
         """Clean up all pipeline resources."""
