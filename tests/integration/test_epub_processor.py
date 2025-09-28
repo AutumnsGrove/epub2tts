@@ -137,13 +137,15 @@ class TestEPUBProcessor:
         long_content = "word " * 100  # 100 words
         chapter = Chapter(1, "Long Chapter", long_content, 100, 5.0)
 
-        chunks = self.processor._split_long_chapter(chapter)
+        chunks = self.processor._split_long_chapter(chapter, 1)
 
         assert len(chunks) == 2
         assert chunks[0].word_count <= 50
         assert chunks[1].word_count <= 50
         assert chunks[0].title == "Long Chapter - Part 1"
         assert chunks[1].title == "Long Chapter - Part 2"
+        assert chunks[0].chapter_num == 1
+        assert chunks[1].chapter_num == 2
 
     def test_save_results_plain_text(self):
         """Test saving results in plain text format."""

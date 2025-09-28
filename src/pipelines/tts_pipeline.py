@@ -335,14 +335,21 @@ class KokoroTTSPipeline:
         # Prepare text chunks from chapters
         text_chunks = []
         for i, chapter in enumerate(chapters):
-            chunk_id = f"chapter_{i+1:03d}_{chapter.get('title', 'untitled')}"
-            # Clean chunk ID for filename
-            chunk_id = "".join(c for c in chunk_id if c.isalnum() or c in '-_')
+            # Create meaningful chapter ID based on actual chapter number if available
+            chapter_num = chapter.get('chapter_num', i + 1)
+            chapter_title = chapter.get('title', f'Chapter {chapter_num}')
+
+            # Clean and shorten title for filename
+            clean_title = "".join(c for c in chapter_title if c.isalnum() or c in ' -_')
+            clean_title = clean_title.replace(' ', '_')[:20]  # Limit length
+
+            chunk_id = f"chapter_{chapter_num:03d}_{clean_title}"
 
             text_chunks.append({
                 'id': chunk_id,
                 'text': chapter['content'],
-                'title': chapter.get('title', f'Chapter {i+1}')
+                'title': chapter_title,
+                'chapter_num': chapter_num
             })
 
         # Process all chunks
@@ -442,6 +449,12 @@ class MLXKokoroModel:
     def __init__(self, config: TTSConfig):
         """Initialize MLX Kokoro model."""
         try:
+            # Suppress phonemizer warnings that are common with TTS models
+            import warnings
+            warnings.filterwarnings("ignore", category=UserWarning, module="phonemizer")
+            warnings.filterwarnings("ignore", message=".*word count mismatch.*")
+            warnings.filterwarnings("ignore", message=".*phonemizer.*")
+
             # Try MLX-Audio first
             try:
                 from mlx_audio.tts.generate import generate_audio
@@ -579,60 +592,65 @@ class MLXKokoroModel:
         import tempfile
         import os
         import time
+        import glob
 
+        # Use a dedicated temp directory that's isolated from main directory
         with tempfile.TemporaryDirectory(prefix="mlx_audio_") as temp_dir:
-            output_path = Path(temp_dir) / f"audio_{hash(text)}.wav"
+            temp_dir_path = Path(temp_dir)
+            output_path = temp_dir_path / f"audio_{hash(text)}.wav"
 
             try:
-                audio_data = self.generate_func(
-                    text=text,
-                    model_path=self.model_path,
-                    voice=voice,
-                    speed=speed,
-                    output_path=str(output_path) if hasattr(self.generate_func, '__code__') and 'output_path' in self.generate_func.__code__.co_varnames else None
-                )
+                # Change to temp directory to contain any files created by MLX-Audio
+                original_cwd = os.getcwd()
+                os.chdir(temp_dir)
 
-                # MLX-Audio may return None and save to file instead
-                if audio_data is None:
-                    logger.debug("MLX-Audio returned None, looking for generated file")
+                try:
+                    audio_data = self.generate_func(
+                        text=text,
+                        model_path=self.model_path,
+                        voice=voice,
+                        speed=speed,
+                        output_path=str(output_path) if hasattr(self.generate_func, '__code__') and 'output_path' in self.generate_func.__code__.co_varnames else None
+                    )
 
-                    # Check specific output path first
-                    if output_path.exists():
-                        import soundfile as sf
-                        audio_data, sample_rate = sf.read(str(output_path))
-                        logger.debug(f"Loaded audio from specified path: {audio_data.shape}, {sample_rate}Hz")
-                    else:
-                        # Look for recently created audio files
-                        import glob
-                        audio_files = glob.glob("audio_*.wav")
-                        if audio_files:
-                            latest_file = max(audio_files, key=os.path.getctime)
-                            # Check if file was created recently (within last 10 seconds)
-                            if time.time() - os.path.getctime(latest_file) < 10:
-                                logger.debug(f"Loading audio from MLX-Audio generated file: {latest_file}")
-                                import soundfile as sf
-                                audio_data, sample_rate = sf.read(latest_file)
-                                logger.debug(f"Loaded audio: {audio_data.shape}, {sample_rate}Hz")
-                                # Clean up the temporary file
-                                try:
-                                    os.remove(latest_file)
-                                    logger.debug(f"Cleaned up temporary file: {latest_file}")
-                                except:
-                                    pass
+                    # MLX-Audio may return None and save to file instead
+                    if audio_data is None:
+                        logger.debug("MLX-Audio returned None, looking for generated file")
+
+                        # Check specific output path first
+                        if output_path.exists():
+                            import soundfile as sf
+                            audio_data, sample_rate = sf.read(str(output_path))
+                            logger.debug(f"Loaded audio from specified path: {audio_data.shape}, {sample_rate}Hz")
+                        else:
+                            # Look for recently created audio files in temp directory only
+                            audio_files = list(temp_dir_path.glob("audio_*.wav"))
+                            if audio_files:
+                                latest_file = max(audio_files, key=lambda x: x.stat().st_ctime)
+                                # Check if file was created recently (within last 10 seconds)
+                                if time.time() - latest_file.stat().st_ctime < 10:
+                                    logger.debug(f"Loading audio from MLX-Audio generated file: {latest_file}")
+                                    import soundfile as sf
+                                    audio_data, sample_rate = sf.read(str(latest_file))
+                                    logger.debug(f"Loaded audio: {audio_data.shape}, {sample_rate}Hz")
+                                else:
+                                    audio_data = None
                             else:
                                 audio_data = None
-                        else:
-                            audio_data = None
 
-                if audio_data is None:
-                    raise RuntimeError("MLX-Audio failed to generate audio data")
+                    if audio_data is None:
+                        raise RuntimeError("MLX-Audio failed to generate audio data")
 
-                # Convert to numpy array if needed
-                if not isinstance(audio_data, np.ndarray):
-                    audio_data = np.array(audio_data)
+                    # Convert to numpy array if needed
+                    if not isinstance(audio_data, np.ndarray):
+                        audio_data = np.array(audio_data)
 
-                logger.debug("MLX-Audio synthesis successful")
-                return audio_data.astype(np.float32)
+                    logger.debug("MLX-Audio synthesis successful")
+                    return audio_data.astype(np.float32)
+
+                finally:
+                    # Always restore original working directory
+                    os.chdir(original_cwd)
 
             except Exception as e:
                 logger.warning(f"MLX-Audio synthesis failed: {e}")

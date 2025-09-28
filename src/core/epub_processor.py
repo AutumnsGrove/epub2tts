@@ -197,6 +197,7 @@ class EPUBProcessor:
             List of processed chapters
         """
         processed_chapters = []
+        current_chapter_num = 1
 
         for chapter in chapters:
             # Filter out very short chapters if configured
@@ -207,19 +208,31 @@ class EPUBProcessor:
             # Split very long chapters if configured
             if chapter.word_count > self.config.chapters.max_words_per_chunk:
                 logger.info(f"Splitting long chapter: {chapter.title} ({chapter.word_count} words)")
-                split_chapters = self._split_long_chapter(chapter)
+                split_chapters = self._split_long_chapter(chapter, current_chapter_num)
                 processed_chapters.extend(split_chapters)
+                current_chapter_num += len(split_chapters)
             else:
-                processed_chapters.append(chapter)
+                # Renumber chapter to sequential numbering
+                renumbered_chapter = Chapter(
+                    chapter_num=current_chapter_num,
+                    title=chapter.title,
+                    content=chapter.content,
+                    word_count=chapter.word_count,
+                    estimated_duration=chapter.estimated_duration,
+                    confidence=chapter.confidence
+                )
+                processed_chapters.append(renumbered_chapter)
+                current_chapter_num += 1
 
         return processed_chapters
 
-    def _split_long_chapter(self, chapter: Chapter) -> List[Chapter]:
+    def _split_long_chapter(self, chapter: Chapter, starting_num: int) -> List[Chapter]:
         """
         Split a long chapter into smaller chunks.
 
         Args:
             chapter: Chapter to split
+            starting_num: Starting chapter number for the chunks
 
         Returns:
             List of chapter chunks
@@ -232,11 +245,18 @@ class EPUBProcessor:
             chunk_words = words[i:i + max_words]
             chunk_content = ' '.join(chunk_words)
 
-            chunk_title = f"{chapter.title} - Part {len(chunks) + 1}"
-            chunk_num = chapter.chapter_num + (len(chunks) * 0.1)  # Sub-chapter numbering
+            # Create more descriptive titles for split chapters
+            part_num = len(chunks) + 1
+            if len(chunks) == 0 and len(words) <= max_words:
+                # If it's the only chunk, don't add "Part 1"
+                chunk_title = chapter.title
+            else:
+                chunk_title = f"{chapter.title} - Part {part_num}"
+
+            chunk_num = starting_num + len(chunks)
 
             chunk = Chapter(
-                chapter_num=int(chunk_num),
+                chapter_num=chunk_num,
                 title=chunk_title,
                 content=chunk_content,
                 word_count=len(chunk_words),
@@ -245,7 +265,7 @@ class EPUBProcessor:
             )
             chunks.append(chunk)
 
-        logger.debug(f"Split chapter into {len(chunks)} chunks")
+        logger.debug(f"Split chapter into {len(chunks)} chunks (chapters {starting_num}-{starting_num + len(chunks) - 1})")
         return chunks
 
     def _save_results(

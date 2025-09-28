@@ -417,11 +417,11 @@ class GemmaVLMModel(BaseVLMModel):
                 "top_p": 0.9
             }
 
-            # Make the API request
+            # Make the API request with longer timeout for complex processing
             response = self.session.post(
                 self.api_endpoint,
                 json=payload,
-                timeout=30,
+                timeout=60,  # Increased to 60 seconds for complex image processing
                 headers={"Content-Type": "application/json"}
             )
 
