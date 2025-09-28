@@ -451,7 +451,7 @@ class MLXKokoroModel:
             except ImportError:
                 # Fall back to direct Kokoro
                 from kokoro import KPipeline
-                self.pipeline = KPipeline(lang_code='a')
+                self.pipeline = KPipeline('a')  # 'a' for autodetect
                 self.use_mlx_audio = False
                 logger.info("Using direct Kokoro backend")
 
@@ -486,22 +486,28 @@ class MLXKokoroModel:
             if self.use_mlx_audio:
                 # Try MLX-Audio first, fall back to direct Kokoro on failure
                 try:
+                    logger.debug(f"Attempting MLX-Audio synthesis: '{text[:50]}...'")
                     audio_data = self.generate_func(
                         text=text,
                         model_path=self.model_path,
                         voice=voice,
                         speed=speed
                     )
-                except (SystemExit, Exception) as e:
-                    logger.warning(f"MLX-Audio failed ({e}), falling back to direct Kokoro")
+                    logger.debug("MLX-Audio synthesis successful")
+                except (SystemExit, RuntimeError, Exception) as e:
+                    logger.warning(f"MLX-Audio failed ({type(e).__name__}: {e}), falling back to direct Kokoro")
+                    # Switch to direct Kokoro for this and future calls
+                    self.use_mlx_audio = False
+
                     # Initialize direct Kokoro if not already done
                     if not hasattr(self, 'pipeline'):
                         from kokoro import KPipeline
-                        self.pipeline = KPipeline(lang_code='a')
+                        logger.info("Initializing direct Kokoro pipeline for fallback")
+                        self.pipeline = KPipeline('a')  # 'a' for autodetect
 
                     # Use direct Kokoro pipeline
-                    generator = self.pipeline(text, voice=voice)
-                    audio_data = np.array(list(generator))
+                    logger.debug(f"Using direct Kokoro for: '{text[:50]}...'")
+                    audio_data = self.pipeline.synthesize(text, voice=voice)
 
                     # Adjust speed if needed
                     if speed != 1.0:
@@ -509,8 +515,8 @@ class MLXKokoroModel:
                         audio_data = signal.resample(audio_data, int(len(audio_data) / speed))
             else:
                 # Use direct Kokoro pipeline
-                generator = self.pipeline(text, voice=voice)
-                audio_data = np.array(list(generator))
+                logger.debug(f"Using direct Kokoro: '{text[:50]}...'")
+                audio_data = self.pipeline.synthesize(text, voice=voice)
 
                 # Adjust speed if needed (simple time-stretch)
                 if speed != 1.0:

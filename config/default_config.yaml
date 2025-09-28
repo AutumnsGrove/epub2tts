@@ -21,7 +21,7 @@ chapters:
 # TTS settings
 tts:
   model: "kokoro"
-  model_path: "./models/kokoro-mlx"
+  model_path: "./models/Kokoro-82M-8bit"
   voice: "bf_lily"
   speed: 1.0
   pitch: 1.0

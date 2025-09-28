@@ -1,0 +1,7 @@
+This is a test of the epub2tts system with Kokoro TTS integration.
+
+The system should convert this text to speech using the MLX-optimized Kokoro model with bf_lily voice.
+
+If MLX-Audio fails due to the pip module error, it should gracefully fall back to direct Kokoro implementation.
+
+This test will validate that the TTS pipeline is working correctly.
