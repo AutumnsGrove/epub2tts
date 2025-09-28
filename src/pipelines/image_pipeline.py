@@ -302,6 +302,209 @@ class LLaVAModel(BaseVLMModel):
         return mock_model.generate_description(image, context, max_length)
 
 
+class GemmaVLMModel(BaseVLMModel):
+    """Gemma-3n-e4b Vision-Language Model via LM Studio API."""
+
+    def __init__(self, model_name: str = "gemma-3n-e4b", api_url: str = "http://127.0.0.1:1234"):
+        """Initialize Gemma VLM model."""
+        super().__init__(model_name)
+        self.api_url = api_url.rstrip('/')
+        self.api_endpoint = f"{self.api_url}/v1/chat/completions"
+        self.session = None
+
+    def load_model(self) -> bool:
+        """Load/test Gemma model connection."""
+        try:
+            import requests
+            self.session = requests.Session()
+
+            # Test connection to LM Studio
+            test_response = self.session.get(f"{self.api_url}/v1/models", timeout=10)
+            if test_response.status_code == 200:
+                models = test_response.json()
+                logger.info(f"Connected to LM Studio. Available models: {[m.get('id', 'unknown') for m in models.get('data', [])]}")
+                self.is_loaded = True
+                return True
+            else:
+                logger.error(f"LM Studio connection failed: {test_response.status_code}")
+                return False
+
+        except Exception as e:
+            logger.error(f"Failed to connect to LM Studio: {e}")
+            return False
+
+    def generate_description(
+        self,
+        image: Image.Image,
+        context: str = "",
+        max_length: int = 100
+    ) -> Tuple[str, float]:
+        """
+        Generate description using Gemma-3n-e4b via LM Studio.
+
+        Args:
+            image: PIL Image object
+            context: Context text from surrounding content
+            max_length: Maximum description length
+
+        Returns:
+            Tuple of (description, confidence_score)
+        """
+        if not self.is_loaded or not self.session:
+            logger.error("Gemma model not loaded")
+            return "Image description unavailable (model not loaded)", 0.0
+
+        try:
+            import base64
+            import io
+
+            # Convert PIL image to base64
+            buffer = io.BytesIO()
+            # Convert to RGB if necessary
+            if image.mode != 'RGB':
+                image = image.convert('RGB')
+
+            # Resize if too large (for efficiency)
+            max_size = 768
+            if max(image.size) > max_size:
+                ratio = max_size / max(image.size)
+                new_size = tuple(int(dim * ratio) for dim in image.size)
+                image = image.resize(new_size, Image.Resampling.LANCZOS)
+
+            image.save(buffer, format='JPEG', quality=85)
+            image_b64 = base64.b64encode(buffer.getvalue()).decode('utf-8')
+
+            # Craft prompt for brief, TTS-friendly descriptions
+            system_prompt = """You are an expert at describing images for audiobook narration.
+            Generate brief, clear descriptions that work well when read aloud.
+            Keep descriptions under 50 words.
+            Focus on the most important visual elements.
+            Be descriptive but concise.
+            Avoid technical jargon.
+            Use natural, flowing language."""
+
+            user_prompt = f"""Describe this image briefly for an audiobook listener.
+            Context: {context[:200] if context else 'No additional context provided.'}
+
+            Provide a clear, concise description in under 50 words that captures the essential visual information."""
+
+            # Prepare the API request
+            payload = {
+                "model": self.model_name,
+                "messages": [
+                    {
+                        "role": "system",
+                        "content": system_prompt
+                    },
+                    {
+                        "role": "user",
+                        "content": [
+                            {
+                                "type": "text",
+                                "text": user_prompt
+                            },
+                            {
+                                "type": "image_url",
+                                "image_url": {
+                                    "url": f"data:image/jpeg;base64,{image_b64}"
+                                }
+                            }
+                        ]
+                    }
+                ],
+                "max_tokens": 150,
+                "temperature": 0.7,
+                "top_p": 0.9
+            }
+
+            # Make the API request
+            response = self.session.post(
+                self.api_endpoint,
+                json=payload,
+                timeout=30,
+                headers={"Content-Type": "application/json"}
+            )
+
+            if response.status_code == 200:
+                result = response.json()
+                description = result['choices'][0]['message']['content'].strip()
+
+                # Post-process the description
+                description = self._clean_description(description, max_length)
+
+                # Calculate confidence based on response quality
+                confidence = self._calculate_confidence(description, result)
+
+                logger.debug(f"Gemma description generated: '{description[:50]}...' (confidence: {confidence:.2f})")
+                return description, confidence
+
+            else:
+                logger.error(f"Gemma API request failed: {response.status_code} - {response.text}")
+                return f"Error generating description: API request failed", 0.0
+
+        except Exception as e:
+            logger.error(f"Error generating Gemma description: {e}")
+            return f"Error generating description: {str(e)}", 0.0
+
+    def _clean_description(self, description: str, max_length: int) -> str:
+        """Clean and optimize description for TTS."""
+        # Remove quotes and problematic characters
+        description = description.strip('"\'')
+
+        # Ensure proper sentence structure
+        if description and not description.endswith(('.', '!', '?')):
+            description += '.'
+
+        # Capitalize first letter
+        if description:
+            description = description[0].upper() + description[1:]
+
+        # Remove problematic characters for TTS
+        description = description.replace('"', '').replace("'", "")
+
+        # Truncate if too long
+        if len(description) > max_length:
+            # Find last complete sentence within limit
+            sentences = description.split('.')
+            result = ""
+            for sentence in sentences:
+                if len(result + sentence + '.') <= max_length:
+                    result += sentence + '.'
+                else:
+                    break
+            description = result.rstrip('.')
+            if description and not description.endswith(('.', '!', '?')):
+                description += '.'
+
+        return description
+
+    def _calculate_confidence(self, description: str, api_result: dict) -> float:
+        """Calculate confidence score based on description quality."""
+        base_confidence = 0.8  # Base confidence for successful API call
+
+        # Reduce confidence for very short descriptions
+        if len(description) < 20:
+            base_confidence -= 0.2
+
+        # Reduce confidence for error messages
+        if "error" in description.lower() or "unavailable" in description.lower():
+            base_confidence = 0.1
+
+        # Check for finish_reason
+        finish_reason = api_result.get('choices', [{}])[0].get('finish_reason', '')
+        if finish_reason == 'length':
+            base_confidence -= 0.1  # Description was truncated
+
+        return max(0.0, min(1.0, base_confidence))
+
+    def unload_model(self) -> None:
+        """Clean up resources."""
+        if self.session:
+            self.session.close()
+            self.session = None
+        self.is_loaded = False
+
+
 class ImageDescriptionPipeline:
     """
     Local VLM pipeline for image description generation.
@@ -328,7 +531,12 @@ class ImageDescriptionPipeline:
         try:
             model_name = self.config.model.lower()
 
-            if "llava" in model_name:
+            if "gemma" in model_name:
+                # Initialize Gemma model with LM Studio
+                api_url = getattr(self.config, 'api_url', 'http://127.0.0.1:1234')
+                self.model = GemmaVLMModel(self.config.model, api_url)
+                logger.info("Initializing Gemma VLM model via LM Studio")
+            elif "llava" in model_name:
                 self.model = LLaVAModel(self.config.model, self.config.model_path)
             else:
                 # Default to mock model for development

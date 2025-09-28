@@ -64,8 +64,9 @@ class TTSConfig:
 class ImageConfig:
     """Configuration for image description."""
     enabled: bool = True
-    model: str = "llava-1.5-7b"
+    model: str = "gemma-3n-e4b"
     model_path: str = "./models/llava"
+    api_url: str = "http://127.0.0.1:1234"
     max_description_length: int = 100
     include_context: bool = True
 

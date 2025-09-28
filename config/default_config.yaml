@@ -40,8 +40,9 @@ tts:
 # VLM settings
 image_description:
   enabled: true
-  model: "llava-1.5-7b"
+  model: "gemma-3n-e4b"
   model_path: "./models/llava"
+  api_url: "http://127.0.0.1:1234"
   max_description_length: 100
   include_context: true
 

@@ -131,8 +131,9 @@ class EPUBProcessor:
             chapters = self._post_process_chapters(chapters)
 
             # Step 7: Save results if output directory specified
+            copied_image_paths = {}
             if output_dir:
-                self._save_results(
+                copied_image_paths = self._save_results(
                     epub_path,
                     output_dir,
                     cleaned_text,
@@ -140,7 +141,7 @@ class EPUBProcessor:
                     metadata,
                     image_info,
                     temp_media_dir
-                )
+                ) or {}
 
             processing_time = time.time() - start_time
 
@@ -317,7 +318,8 @@ class EPUBProcessor:
                     f.write(f"  Words: {chapter.word_count}\n")
                     f.write(f"  Estimated duration: {chapter.estimated_duration:.1f} minutes\n\n")
 
-        # Copy images if they were extracted
+        # Copy images if they were extracted - DO THIS BEFORE ANY CLEANUP
+        copied_image_paths = {}
         if temp_media_dir and temp_media_dir.exists() and image_info:
             images_dir = output_dir / f"{base_name}_images"
             images_dir.mkdir(exist_ok=True)
@@ -331,13 +333,31 @@ class EPUBProcessor:
                 if media_file.is_file() and media_file.suffix.lower() in image_extensions:
                     dest_file = images_dir / media_file.name
                     shutil.copy2(media_file, dest_file)
+
+                    # Track the mapping of old path to new path
+                    copied_image_paths[str(media_file)] = str(dest_file)
+                    copied_image_paths[media_file.name] = str(dest_file)
+
                     copied_count += 1
-                    logger.debug(f"Copied image: {media_file.name}")
+                    logger.debug(f"Copied image: {media_file.name} -> {dest_file}")
 
             if copied_count > 0:
                 logger.info(f"Copied {copied_count} images to {images_dir}")
 
+            # Update image_info with new persistent paths
+            for info in image_info:
+                old_path = info.get('file_path', '')
+                filename = Path(old_path).name
+
+                if filename in copied_image_paths:
+                    info['file_path'] = copied_image_paths[filename]
+                    info['local_path'] = copied_image_paths[filename]
+                    logger.debug(f"Updated image path: {filename} -> {info['file_path']}")
+
         logger.info(f"Results saved to {output_dir}")
+
+        # Return the updated image paths for the orchestrator
+        return copied_image_paths
 
     def validate_epub(self, epub_path: Path) -> List[str]:
         """

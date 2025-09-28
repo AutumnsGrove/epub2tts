@@ -121,16 +121,35 @@ class PipelineOrchestrator(LoggerMixin):
             image_descriptions = []
             if enable_images and self.image_pipeline and epub_result.image_info:
                 stage_start = time.time()
-                with PerformanceLogger("Image description generation"):
-                    image_result = self.image_pipeline.batch_process_images(
-                        epub_result.image_info,
-                        parallel=True
-                    )
-                    if image_result.success:
-                        image_descriptions = image_result.descriptions
-                        self.logger.info(f"Image processing completed: {len(image_descriptions)} descriptions")
+
+                # Ensure images have been copied to permanent location
+                # Wait a moment for any file operations to complete
+                import time
+                time.sleep(0.1)
+
+                # Validate that image files exist before processing
+                valid_image_info = []
+                for image_info in epub_result.image_info:
+                    image_path = image_info.get('file_path', '')
+                    if image_path and Path(image_path).exists():
+                        valid_image_info.append(image_info)
+                        self.logger.debug(f"Validated image path: {image_path}")
                     else:
-                        self.logger.warning("Image processing failed")
+                        self.logger.warning(f"Image file not found: {image_path}")
+
+                if valid_image_info:
+                    with PerformanceLogger("Image description generation"):
+                        image_result = self.image_pipeline.batch_process_images(
+                            valid_image_info,
+                            parallel=True
+                        )
+                        if image_result.success:
+                            image_descriptions = image_result.descriptions
+                            self.logger.info(f"Image processing completed: {len(image_descriptions)} descriptions")
+                        else:
+                            self.logger.warning("Image processing failed")
+                else:
+                    self.logger.warning("No valid image files found for processing")
 
                 stage_times['image_processing'] = time.time() - stage_start
 
