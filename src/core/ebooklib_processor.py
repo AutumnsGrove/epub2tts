@@ -104,14 +104,16 @@ class EbookLibProcessor:
     Modern EPUB processor using EbookLib for native parsing.
     """
 
-    def __init__(self, config: Config):
+    def __init__(self, config: Config, progress_tracker=None):
         """
         Initialize EPUB processor with configuration.
 
         Args:
             config: Configuration object
+            progress_tracker: Optional progress tracker for UI updates
         """
         self.config = config
+        self.progress_tracker = progress_tracker
         self.cleaner = TextCleaner()
 
         # Create temp directory if needed

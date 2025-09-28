@@ -19,6 +19,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 from core.epub_processor import EPUBProcessor
 from utils.config import load_config, Config
 from utils.logger import setup_logging
+from ui import ProgressTracker, create_ui_manager
 
 
 @click.command()
@@ -130,8 +131,21 @@ def process_epub(
         if not (0.5 <= speed <= 2.0):
             raise click.BadParameter("Speed must be between 0.5 and 2.0")
 
+        # Create progress tracker
+        progress_tracker = ProgressTracker()
+
+        # Create UI manager if split-window mode
+        ui_manager = None
+        ui_started = False
+        if app_config.ui.mode == 'split-window':
+            ui_manager = create_ui_manager(app_config.ui, progress_tracker)
+            click.echo("Starting split-window terminal UI...")
+            ui_started = ui_manager.start()
+            if not ui_started:
+                click.echo("⚠️  Split-window UI not available, falling back to classic mode")
+
         # Initialize processor
-        processor = EPUBProcessor(app_config)
+        processor = EPUBProcessor(app_config, progress_tracker=progress_tracker)
 
         # Validate EPUB file
         if validate_only or info:
@@ -173,69 +187,61 @@ def process_epub(
 
             sys.exit(0)
 
-        # Check for existing output and resume capability
-        if resume and output_dir.exists():
-            logger.info(f"Resume mode: checking for existing output in {output_dir}")
-            # TODO: Implement resume logic
+        try:
+            # Check for existing output and resume capability
+            if resume and output_dir.exists():
+                logger.info(f"Resume mode: checking for existing output in {output_dir}")
+                # TODO: Implement resume logic
 
-        # Process EPUB
-        logger.info("Starting EPUB processing...")
-        start_time = time.time()
+            # Process EPUB
+            logger.info("Starting EPUB processing...")
+            start_time = time.time()
 
-        with click.progressbar(
-            length=100,
-            label='Processing EPUB',
-            show_percent=True,
-            show_eta=True
-        ) as bar:
-            # Simulate progress updates (in real implementation, this would be callbacks)
-            bar.update(20)  # Metadata extraction
+            # Use conditional UI system based on mode
+            if app_config.ui.mode == 'split-window' and ui_started:
+                # Progress tracking is handled by the UI manager
+                result = processor.process_epub(input_file, output_dir)
+            else:
+                # Use classic click progressbar
+                with click.progressbar(
+                    length=100,
+                    label='Processing EPUB',
+                    show_percent=True,
+                    show_eta=True
+                ) as bar:
+                    # Simulate progress updates (in real implementation, this would be callbacks)
+                    bar.update(20)  # Metadata extraction
 
-            result = processor.process_epub(input_file, output_dir)
+                    result = processor.process_epub(input_file, output_dir)
 
-            bar.update(80)  # Processing complete
+                    bar.update(80)  # Processing complete
 
-        processing_time = time.time() - start_time
+            processing_time = time.time() - start_time
 
-        # Handle results
-        if result.success:
-            click.echo(f"\n✅ Processing completed successfully in {processing_time:.2f}s")
-            click.echo(f"📁 Output saved to: {output_dir}")
-            click.echo(f"📄 Text content: {len(result.text_content):,} characters")
-            click.echo(f"📚 Chapters extracted: {len(result.chapters)}")
+            # Handle results
+            if result.success:
+                click.echo(f"\n✅ Processing completed successfully in {processing_time:.2f}s")
+                click.echo(f"📁 Output saved to: {output_dir}")
+                click.echo(f"📄 Text content: {len(result.text_content):,} characters")
+                click.echo(f"📚 Chapters extracted: {len(result.chapters)}")
 
             if result.image_info:
                 click.echo(f"🖼️  Images processed: {len(result.image_info)}")
 
-            # Show cleaning stats
-            stats = result.cleaning_stats
-            click.echo(f"🧹 Text cleaning: {stats.characters_removed:,} characters removed "
-                      f"({stats.compression_ratio:.1%} retained)")
+                # Show cleaning stats
+                stats = result.cleaning_stats
+                click.echo(f"🧹 Text cleaning: {stats.characters_removed:,} characters removed "
+                          f"({stats.compression_ratio:.1%} retained)")
 
-            # TTS processing if requested
-            if tts:
-                click.echo("\n🔊 Starting TTS generation...")
-                try:
-                    from pipelines.orchestrator import PipelineOrchestrator
-                    from ui.progress_tracker import ProgressTracker
-                    from ui.terminal_ui import create_ui_manager
-
-                    # Initialize progress tracker and UI
-                    progress_tracker = ProgressTracker()
-                    ui_manager = create_ui_manager(app_config.ui, progress_tracker)
-
-                    # Start UI if split-window mode is enabled
-                    ui_started = False
-                    if app_config.ui.mode == "split-window":
-                        click.echo("Starting split-window terminal UI...")
-                        ui_started = ui_manager.start()
-                        if not ui_started:
-                            click.echo("⚠️  Split-window UI not available, falling back to classic mode")
-
-                    # Initialize orchestrator with progress tracking
-                    orchestrator = PipelineOrchestrator(app_config, progress_tracker)
-
+                # TTS processing if requested
+                if tts:
+                    click.echo("\n🔊 Starting TTS generation...")
                     try:
+                        from pipelines.orchestrator import PipelineOrchestrator
+
+                        # Initialize orchestrator with progress tracking (reuse existing progress_tracker)
+                        orchestrator = PipelineOrchestrator(app_config, progress_tracker)
+
                         # Run full pipeline with TTS
                         pipeline_result = orchestrator.process_epub_complete(
                             input_file,
@@ -243,30 +249,31 @@ def process_epub(
                             enable_tts=True,
                             enable_images=images
                         )
-                    finally:
-                        # Stop UI if it was started
-                        if ui_started:
-                            ui_manager.stop()
-                            click.echo("\nTerminal UI stopped.")
 
-                    if pipeline_result.tts_results:
-                        tts_stats = pipeline_result.tts_results
-                        click.echo(f"✅ TTS generation completed!")
-                        click.echo(f"🔊 Audio files: {tts_stats.get('successful_chapters', 0)}/{tts_stats.get('total_chapters', 0)} chapters")
-                        if tts_stats.get('merged_file'):
-                            click.echo(f"📻 Merged audiobook: {Path(tts_stats['merged_file']).name}")
-                        if tts_stats.get('total_audio_duration'):
-                            click.echo(f"⏱️  Total duration: {tts_stats['total_audio_duration']:.1f} minutes")
-                    else:
-                        click.echo("⚠️  TTS generation failed or produced no results")
+                        if pipeline_result.tts_results:
+                            tts_stats = pipeline_result.tts_results
+                            click.echo(f"✅ TTS generation completed!")
+                            click.echo(f"🔊 Audio files: {tts_stats.get('successful_chapters', 0)}/{tts_stats.get('total_chapters', 0)} chapters")
+                            if tts_stats.get('merged_file'):
+                                click.echo(f"📻 Merged audiobook: {Path(tts_stats['merged_file']).name}")
+                            if tts_stats.get('total_audio_duration'):
+                                click.echo(f"⏱️  Total duration: {tts_stats['total_audio_duration']:.1f} minutes")
+                        else:
+                            click.echo("⚠️  TTS generation failed or produced no results")
 
-                except Exception as e:
-                    logger.error(f"TTS generation failed: {e}", exc_info=True)
-                    click.echo(f"❌ TTS generation failed: {e}")
+                    except Exception as e:
+                        logger.error(f"TTS generation failed: {e}", exc_info=True)
+                        click.echo(f"❌ TTS generation failed: {e}")
 
-        else:
-            click.echo(f"\n❌ Processing failed: {result.error_message}")
-            sys.exit(1)
+            else:
+                click.echo(f"\n❌ Processing failed: {result.error_message}")
+                sys.exit(1)
+
+        finally:
+            # Stop UI manager if it was started
+            if ui_started and ui_manager:
+                ui_manager.stop()
+                click.echo("\nTerminal UI stopped.")
 
     except Exception as e:
         logger.error(f"Unexpected error: {e}", exc_info=True)
@@ -286,7 +293,7 @@ def validate(epub_file: Path):
     """Validate an EPUB file."""
     try:
         config = load_config()
-        processor = EPUBProcessor(config)
+        processor = EPUBProcessor(config, progress_tracker=None)
 
         issues = processor.validate_epub(epub_file)
 
@@ -309,7 +316,7 @@ def info(epub_file: Path):
     """Show information about an EPUB file."""
     try:
         config = load_config()
-        processor = EPUBProcessor(config)
+        processor = EPUBProcessor(config, progress_tracker=None)
 
         epub_info = processor.get_processing_info(epub_file)
 

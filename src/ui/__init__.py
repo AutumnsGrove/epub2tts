@@ -17,6 +17,12 @@ from .progress_tracker import (
     create_error_event,
 )
 
+from .terminal_ui import (
+    TerminalUIManager,
+    UIConfig,
+    create_ui_manager,
+)
+
 __all__ = [
     "ProgressTracker",
     "ProgressEvent",
@@ -27,4 +33,7 @@ __all__ = [
     "create_progress_event",
     "create_complete_event",
     "create_error_event",
+    "TerminalUIManager",
+    "UIConfig",
+    "create_ui_manager",
 ]

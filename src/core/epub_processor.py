@@ -53,21 +53,23 @@ class EPUBProcessor:
     Main processor for EPUB to text conversion.
     """
 
-    def __init__(self, config: Config):
+    def __init__(self, config: Config, progress_tracker=None):
         """
         Initialize EPUB processor with configuration.
 
         Args:
             config: Configuration object
+            progress_tracker: Optional progress tracker for UI updates
         """
         self.config = config
+        self.progress_tracker = progress_tracker
 
         # Determine which processor to use
         processor_type = getattr(config.processing, 'epub_processor', 'pandoc')
 
         if processor_type == 'ebooklib':
             logger.info("Using EbookLib processor for modern EPUB handling")
-            self.processor = EbookLibProcessor(config)
+            self.processor = EbookLibProcessor(config, progress_tracker=self.progress_tracker)
             self.use_ebooklib = True
         else:
             logger.info("Using Pandoc processor for legacy EPUB handling")
