@@ -84,7 +84,12 @@ chapter_detection:
     - '^Chapter\s+[IVX]+'
     - '^CHAPTER\s+\d+'
     - '^#{1,3}\s+Chapter'
+    - '^#{1,3}\s+\d+[\.\s]+'
     - '^\d+\.\s*[A-Z]'
+    - '^#{1,3}\s+[A-Z][^#\n]*$'
+    - '^[A-Z][A-Z\s]{3,}$'
+    - '^Part\s+[IVX\d]+'
+    - '^Section\s+[IVX\d]+'
 
   confidence_thresholds:
     high: 0.9

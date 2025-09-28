@@ -205,8 +205,34 @@ def process_epub(
             # TTS processing if requested
             if tts:
                 click.echo("\n🔊 Starting TTS generation...")
-                # TODO: Implement TTS processing
-                click.echo("TTS processing not yet implemented")
+                try:
+                    from pipelines.orchestrator import PipelineOrchestrator
+
+                    # Initialize orchestrator with TTS enabled
+                    orchestrator = PipelineOrchestrator(app_config)
+
+                    # Run full pipeline with TTS
+                    pipeline_result = orchestrator.process_epub_complete(
+                        input_file,
+                        output_dir,
+                        enable_tts=True,
+                        enable_images=images
+                    )
+
+                    if pipeline_result.tts_results:
+                        tts_stats = pipeline_result.tts_results
+                        click.echo(f"✅ TTS generation completed!")
+                        click.echo(f"🔊 Audio files: {tts_stats.get('successful_chapters', 0)}/{tts_stats.get('total_chapters', 0)} chapters")
+                        if tts_stats.get('merged_file'):
+                            click.echo(f"📻 Merged audiobook: {Path(tts_stats['merged_file']).name}")
+                        if tts_stats.get('total_audio_duration'):
+                            click.echo(f"⏱️  Total duration: {tts_stats['total_audio_duration']:.1f} minutes")
+                    else:
+                        click.echo("⚠️  TTS generation failed or produced no results")
+
+                except Exception as e:
+                    logger.error(f"TTS generation failed: {e}", exc_info=True)
+                    click.echo(f"❌ TTS generation failed: {e}")
 
         else:
             click.echo(f"\n❌ Processing failed: {result.error_message}")

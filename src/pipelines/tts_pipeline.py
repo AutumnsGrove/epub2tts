@@ -738,7 +738,7 @@ class MockKokoroModel:
         pitch: float = 1.0
     ) -> np.ndarray:
         """
-        Generate mock audio data.
+        Generate mock speech-like audio data.
 
         Args:
             text: Text to synthesize
@@ -747,26 +747,57 @@ class MockKokoroModel:
             pitch: Speech pitch
 
         Returns:
-            Mock audio data as numpy array
+            Speech-like audio data as numpy array
         """
-        # Generate simple sine wave as mock audio
-        duration = len(text) * 0.05  # 50ms per character
+        # Calculate duration based on typical speech rate (200-250 words per minute)
+        words = len(text.split())
+        chars = len(text)
+
+        # Base duration calculation: ~5 chars per second at normal speed
+        duration = max(chars * 0.08 / speed, 0.5)  # Minimum 0.5 seconds
+
         sample_rate = self.config.sample_rate
-
-        # Adjust duration based on speed
-        duration = duration / speed
-
         t = np.linspace(0, duration, int(sample_rate * duration), False)
 
-        # Generate a simple tone that varies based on text content
-        frequency = 440 + (hash(text) % 200)  # Vary frequency based on text
-        amplitude = 0.1  # Keep volume low
+        # Generate speech-like formant frequencies
+        base_freq = 100 + (hash(voice) % 50)  # Voice-dependent base frequency
 
-        audio_data = amplitude * np.sin(2 * np.pi * frequency * t * pitch)
+        # Create multiple formants for more natural sound
+        formant1 = base_freq * pitch  # Fundamental frequency
+        formant2 = formant1 * 2.5     # First formant
+        formant3 = formant1 * 4.2     # Second formant
 
-        # Add some variation to make it less monotonic
-        modulation = 0.1 * np.sin(2 * np.pi * 2 * t)
-        audio_data = audio_data * (1 + modulation)
+        # Generate speech envelope with natural rhythm
+        # Add rhythm based on text content
+        rhythm_freq = 3 + (chars % 5)  # 3-8 Hz rhythm
+        envelope = 0.5 * (1 + 0.3 * np.sin(2 * np.pi * rhythm_freq * t))
+        envelope *= np.exp(-t * 0.2)  # Natural decay
+
+        # Create speech-like signal with multiple harmonics
+        signal = (
+            0.6 * np.sin(2 * np.pi * formant1 * t) +
+            0.3 * np.sin(2 * np.pi * formant2 * t) +
+            0.1 * np.sin(2 * np.pi * formant3 * t)
+        )
+
+        # Add consonant-like noise bursts
+        noise_factor = 0.1
+        consonant_positions = [i / chars for i, c in enumerate(text)
+                             if c.lower() in 'bcdfghjklmnpqrstvwxyz']
+
+        for pos in consonant_positions:
+            noise_start = int(pos * len(t))
+            noise_end = min(noise_start + int(0.02 * sample_rate), len(t))
+            if noise_start < len(t):
+                noise = noise_factor * np.random.normal(0, 1, noise_end - noise_start)
+                signal[noise_start:noise_end] += noise
+
+        # Apply envelope and normalize
+        audio_data = signal * envelope
+
+        # Normalize to prevent clipping while keeping reasonable volume
+        if np.max(np.abs(audio_data)) > 0:
+            audio_data = 0.3 * audio_data / np.max(np.abs(audio_data))
 
         return audio_data.astype(np.float32)
 
