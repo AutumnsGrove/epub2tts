@@ -30,6 +30,10 @@ chapters:
 
 # TTS settings
 tts:
+  # Engine selection: "kokoro" (default, local) or "elevenlabs" (API, requires key)
+  engine: "kokoro"
+
+  # Kokoro settings (local TTS)
   model: "kokoro"
   model_path: "./models/Kokoro-82M-8bit"
   voice: "bf_lily"
@@ -38,10 +42,18 @@ tts:
   sample_rate: 22050
   output_format: "wav"  # or mp3
 
-  # MLX-specific settings
+  # MLX-specific settings (for Kokoro)
   use_mlx: true
   quantization: false
   mlx_cache_dir: null
+
+  # ElevenLabs settings (cloud TTS, requires API key in secrets.json)
+  elevenlabs_voice_id: "21m00Tcm4TlvDq8ikWAM"  # Rachel voice (clear female - similar to bf_lily)
+  elevenlabs_model: "eleven_multilingual_v2"    # or "eleven_flash_v2_5", "eleven_turbo_v2_5"
+  elevenlabs_stability: 0.75                    # Voice stability (0.0-1.0)
+  elevenlabs_similarity_boost: 0.75             # Voice similarity boost (0.0-1.0)
+  elevenlabs_style: 0.0                        # Voice style exaggeration (0.0-1.0)
+  elevenlabs_max_chunk_chars: 2500             # Max characters per API request
 
   # Performance settings
   batch_size: 1

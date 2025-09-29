@@ -54,18 +54,30 @@ class ChapterConfig:
 @dataclass
 class TTSConfig:
     """Configuration for TTS pipeline."""
+    # Engine selection
+    engine: str = "kokoro"  # "kokoro" or "elevenlabs"
+
+    # Kokoro settings
     model: str = "kokoro"
-    model_path: str = "hexgrad/Kokoro-82M"
+    model_path: str = "./models/Kokoro-82M-8bit"
     voice: str = "bf_lily"
     speed: float = 1.0
     pitch: float = 1.0
     sample_rate: int = 22050
     output_format: str = "wav"
 
-    # MLX-specific settings
+    # MLX-specific settings (for Kokoro)
     use_mlx: bool = True
     quantization: bool = False
     mlx_cache_dir: Optional[str] = None
+
+    # ElevenLabs settings
+    elevenlabs_voice_id: str = "JBFqnCBsd6RMkjVDRZzb"  # George voice
+    elevenlabs_model: str = "eleven_multilingual_v2"
+    elevenlabs_stability: float = 0.75
+    elevenlabs_similarity_boost: float = 0.75
+    elevenlabs_style: float = 0.0
+    elevenlabs_max_chunk_chars: int = 2500
 
     # Performance settings
     batch_size: int = 1

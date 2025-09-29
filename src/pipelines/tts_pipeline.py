@@ -513,12 +513,31 @@ class MLXKokoroModel:
             warnings.filterwarnings("ignore", message=".*word count mismatch.*")
             warnings.filterwarnings("ignore", message=".*phonemizer.*")
 
+            self.config = config
+            self.model_path = config.model_path
+            self.voice = config.voice
+
+            # Check if we have a local model with safetensors
+            local_model_available = self._check_local_model()
+
             # Try to import Kokoro directly first (preferred for local models)
             try:
                 from kokoro import KPipeline
-                self.pipeline = KPipeline('a')  # 'a' for autodetect
-                self.use_mlx_audio = False
-                logger.info("Using direct Kokoro backend (best for local models)")
+                if local_model_available:
+                    logger.info(f"Local Kokoro model found at: {self.model_path}")
+                    # Initialize with language code 'a' and repo_id pointing to local model
+                    self.pipeline = KPipeline('a', repo_id=self.model_path)
+                    self.use_mlx_audio = False
+                    logger.info("Using direct Kokoro backend with local model")
+                else:
+                    logger.warning("Local model not found, trying HuggingFace path")
+                    # For HuggingFace models, use the model path if it looks like a repo
+                    if self.model_path.startswith('hexgrad/') or '/' in self.model_path:
+                        self.pipeline = KPipeline('a', repo_id=self.model_path)
+                    else:
+                        self.pipeline = KPipeline('a')
+                    self.use_mlx_audio = False
+                    logger.info("Using direct Kokoro backend with HuggingFace model")
             except ImportError as e:
                 logger.warning(f"Direct Kokoro not available: {e}")
                 # Fall back to MLX-Audio if available
@@ -526,14 +545,22 @@ class MLXKokoroModel:
                     from mlx_audio.tts.generate import generate_audio
                     self.generate_func = generate_audio
                     self.use_mlx_audio = True
+                    if local_model_available:
+                        logger.warning("MLX-Audio doesn't support local models, may have issues")
                     logger.info("Using MLX-Audio backend (HuggingFace models only)")
                 except ImportError as e2:
                     logger.error(f"Neither Kokoro nor MLX-Audio available: {e}, {e2}")
                     raise RuntimeError("No TTS backend available")
-
-            self.config = config
-            self.model_path = config.model_path
-            self.voice = config.voice
+            except Exception as e:
+                logger.error(f"Error initializing Kokoro pipeline: {e}")
+                # Try to fall back to MLX-Audio
+                try:
+                    from mlx_audio.tts.generate import generate_audio
+                    self.generate_func = generate_audio
+                    self.use_mlx_audio = True
+                    logger.info("Falling back to MLX-Audio backend")
+                except ImportError:
+                    raise RuntimeError(f"Kokoro initialization failed and no fallback available: {e}")
 
             # Metal framework stability settings
             self.force_sequential = True  # Force sequential processing for MLX
@@ -545,6 +572,31 @@ class MLXKokoroModel:
         except ImportError as e:
             logger.error(f"Failed to import Kokoro libraries: {e}")
             raise RuntimeError("Kokoro TTS not available")
+        except Exception as e:
+            logger.error(f"Unexpected error during Kokoro initialization: {e}")
+            raise RuntimeError(f"Kokoro TTS initialization failed: {e}")
+
+    def _check_local_model(self) -> bool:
+        """Check if local model files exist."""
+        from pathlib import Path
+
+        model_path = Path(self.model_path)
+
+        # Check for safetensors file
+        if model_path.is_dir():
+            safetensors_files = list(model_path.glob("*.safetensors"))
+            if safetensors_files:
+                logger.info(f"Found safetensors files: {[f.name for f in safetensors_files]}")
+                return True
+            else:
+                logger.warning(f"No safetensors files found in {model_path}")
+                return False
+        elif model_path.is_file() and model_path.suffix == '.safetensors':
+            logger.info(f"Direct safetensors file: {model_path}")
+            return True
+        else:
+            logger.info(f"Model path {model_path} doesn't appear to be a local model")
+            return False
 
     def synthesize(
         self,
@@ -735,7 +787,12 @@ class MLXKokoroModel:
         if not hasattr(self, 'pipeline'):
             from kokoro import KPipeline
             logger.info("Initializing direct Kokoro pipeline for fallback")
-            self.pipeline = KPipeline('a')  # 'a' for autodetect
+            # Initialize with language code and repo_id if local model available
+            from pathlib import Path
+            if Path(self.model_path).exists():
+                self.pipeline = KPipeline('a', repo_id=self.model_path)
+            else:
+                self.pipeline = KPipeline('a')  # 'a' for autodetect
 
         # Clean and chunk text to avoid tokenization issues
         cleaned_text = self._clean_text_for_tts(text)
@@ -874,15 +931,51 @@ class MLXKokoroModel:
         return ["bf_lily", "af_heart", "bf_emma", "am_adam", "af_sarah", "bf_grace"]
 
 
-def create_tts_pipeline(config: TTSConfig, progress_tracker: Optional[ProgressTracker] = None) -> KokoroTTSPipeline:
+def create_tts_pipeline(config: TTSConfig, progress_tracker: Optional[ProgressTracker] = None):
     """
-    Factory function to create TTS pipeline.
+    Factory function to create TTS pipeline based on configuration and available resources.
 
     Args:
         config: TTS configuration
         progress_tracker: Optional progress tracking system
 
     Returns:
-        Initialized TTS pipeline
+        Initialized TTS pipeline (KokoroTTSPipeline or ElevenLabsTTSPipeline)
+
+    Raises:
+        RuntimeError: If no TTS engine is available
     """
-    return KokoroTTSPipeline(config, progress_tracker)
+    from utils.secrets import has_elevenlabs_api_key
+
+    # Determine which engine to use
+    requested_engine = getattr(config, 'engine', 'kokoro')
+
+    if requested_engine == 'elevenlabs':
+        # User explicitly requested ElevenLabs
+        if has_elevenlabs_api_key():
+            try:
+                from pipelines.elevenlabs_tts import create_elevenlabs_tts_pipeline
+                logger.info("Creating ElevenLabs TTS pipeline (user requested)")
+                return create_elevenlabs_tts_pipeline(config, progress_tracker)
+            except Exception as e:
+                logger.error(f"Failed to initialize ElevenLabs TTS: {e}")
+                logger.info("Falling back to Kokoro TTS")
+                # Fall back to Kokoro
+                return KokoroTTSPipeline(config, progress_tracker)
+        else:
+            logger.warning(
+                "ElevenLabs TTS requested but no API key found. "
+                "Add 'elevenlabs_api_key' to secrets.json or set ELEVENLABS_API_KEY environment variable. "
+                "Falling back to Kokoro TTS."
+            )
+            return KokoroTTSPipeline(config, progress_tracker)
+
+    elif requested_engine == 'kokoro':
+        # User explicitly requested Kokoro
+        logger.info("Creating Kokoro TTS pipeline (user requested)")
+        return KokoroTTSPipeline(config, progress_tracker)
+
+    else:
+        # Default to Kokoro TTS (preferred local engine)
+        logger.info("Using Kokoro TTS (default engine)")
+        return KokoroTTSPipeline(config, progress_tracker)
