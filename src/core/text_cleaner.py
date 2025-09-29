@@ -341,6 +341,22 @@ class TextCleaner:
             text
         )
 
+        # Comma pauses
+        comma_pause = pause_rules.get('comma_pause', 0.5)
+        text = re.sub(
+            r',(\s+)',
+            rf',[PAUSE: {comma_pause}]\1',
+            text
+        )
+
+        # Sentence end pauses (periods)
+        sentence_pause = pause_rules.get('sentence_end', 0.5)
+        text = re.sub(
+            r'\.(\s+)',
+            rf'.[PAUSE: {sentence_pause}]\1',
+            text
+        )
+
         # Paragraph pauses (double newlines)
         paragraph_pause = pause_rules.get('paragraph_end', 0.5)
         text = re.sub(

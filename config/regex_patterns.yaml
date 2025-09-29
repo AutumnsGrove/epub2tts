@@ -67,16 +67,26 @@ cleaning_rules:
     '£': ' pounds '
     '@': ' at '
     '#': ' number '
+    # Fix apostrophe issues - normalize to simple apostrophe
+    "\u2018": "'"  # Left single quotation mark
+    "\u2019": "'"  # Right single quotation mark
+    "\u201B": "'"  # Single high-reversed-9 quotation mark
+    "\u2032": "'"  # Prime
+    "`": "'"       # Backtick
+    "\u00b4": "'"  # Acute accent
+    # Preserve existing apostrophes
+    "'": "'"       # Ensure regular apostrophes stay
 
 # Pause insertion rules
 pause_rules:
   chapter_start: 2.0
-  header_end: 1.0      # Pause after headers (h1-h6)
+  header_end: 3.0      # Longer pause after headers/titles (was 1.0)
   paragraph_end: 0.5
-  question_end: 0.3
-  exclamation_end: 0.2
+  question_end: 0.5    # Increased pause after questions
+  exclamation_end: 0.5 # Increased pause after exclamations
   dialogue_end: 0.3
-  sentence_end: 0.1
+  sentence_end: 0.5    # Increased pause after sentences
+  comma_pause: 0.5     # New: pause after commas
 
 # Chapter detection patterns
 chapter_detection:
