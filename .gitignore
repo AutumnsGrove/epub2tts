@@ -85,6 +85,9 @@ Thumbs.db
 config/local_config.yaml
 config/secrets.yaml
 
+# Secrets and API keys
+secrets.json
+
 # Test fixtures (except samples)
 tests/fixtures/sample_epubs/*.epub
 tests/fixtures/test_images/*.jpg
