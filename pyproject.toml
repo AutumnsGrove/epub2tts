@@ -50,6 +50,7 @@ dependencies = [
     "torch>=2.0.0",
     "mlx>=0.18.0",
     "elevenlabs>=1.0.0",
+    "hume>=0.7.0",
 
     # Image processing
     "Pillow>=10.0.0",

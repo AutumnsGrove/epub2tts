@@ -89,6 +89,54 @@ def validate_elevenlabs_api_key(api_key: str) -> bool:
     return len(api_key) > 10 and api_key.strip() == api_key
 
 
+def get_hume_api_key() -> Optional[str]:
+    """
+    Get Hume API key from secrets or environment variables.
+
+    Returns:
+        Hume API key if available, None otherwise
+    """
+    secrets = load_secrets()
+
+    # Try secrets.json first, then environment variable
+    api_key = secrets.get("hume_api_key") or os.getenv("HUME_API_KEY")
+
+    if api_key:
+        logger.debug("Hume API key found")
+        return api_key
+    else:
+        logger.debug("No Hume API key found in secrets.json or environment variables")
+        return None
+
+
+def has_hume_api_key() -> bool:
+    """
+    Check if Hume API key is available.
+
+    Returns:
+        True if API key is available, False otherwise
+    """
+    return get_hume_api_key() is not None
+
+
+def validate_hume_api_key(api_key: str) -> bool:
+    """
+    Validate Hume API key format.
+
+    Args:
+        api_key: API key to validate
+
+    Returns:
+        True if key format appears valid, False otherwise
+    """
+    if not api_key or not isinstance(api_key, str):
+        return False
+
+    # Hume API keys typically start with a specific format
+    # This is a basic validation - actual validation happens during API calls
+    return len(api_key) > 10 and api_key.strip() == api_key
+
+
 def get_available_secrets() -> Dict[str, bool]:
     """
     Get information about which secrets are available.
@@ -97,5 +145,6 @@ def get_available_secrets() -> Dict[str, bool]:
         Dictionary with secret names as keys and availability as values
     """
     return {
-        "elevenlabs_api_key": has_elevenlabs_api_key()
+        "elevenlabs_api_key": has_elevenlabs_api_key(),
+        "hume_api_key": has_hume_api_key()
     }
