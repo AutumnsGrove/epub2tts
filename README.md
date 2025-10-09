@@ -1,13 +1,16 @@
 # epub2tts
 
-A production-ready EPUB to TTS converter that converts EPUB files into optimized text and audio using Kokoro TTS and local VLM for image descriptions.
+A production-ready EPUB to TTS converter that converts EPUB files into optimized text and audio using multiple TTS engines (Kokoro, ElevenLabs, Hume AI) and local VLM for image descriptions.
 
 ## Features
 
 - **Modern EPUB Processing**: Native EPUB handling with EbookLib (faster and more accurate than Pandoc)
 - **Advanced Text Processing**: Modern NLP-based processing with spaCy, plus legacy regex fallback
 - **Chapter Segmentation**: Intelligent chapter detection using TOC data and ML confidence scoring
-- **TTS Integration**: High-quality audio generation using Kokoro TTS with MLX optimization
+- **Multi-Engine TTS Integration**: Support for three TTS engines:
+  - **Kokoro TTS**: Local, high-quality audio with MLX optimization
+  - **ElevenLabs**: Premium cloud-based voices with natural inflection
+  - **Hume AI**: Ultra-low latency (<200ms), emotion-aware synthesis with multilingual support (11 languages)
 - **Local VLM Integration**: Image content description using local vision-language models (Gemma, LLaVA)
 - **Split-Window Terminal UI**: Advanced real-time progress tracking with live stats and activity logs
 - **Batch Processing**: Parallel processing of multiple files with comprehensive error handling
@@ -28,8 +31,14 @@ uv sync
 # Basic text extraction
 uv run python scripts/process_epub.py book.epub
 
-# Full pipeline with TTS
+# Full pipeline with Kokoro TTS (local)
 uv run python scripts/process_epub.py book.epub --tts --voice "bf_lily"
+
+# Full pipeline with ElevenLabs TTS (cloud)
+uv run python scripts/process_epub.py book.epub --tts --engine elevenlabs --voice "Rachel"
+
+# Full pipeline with Hume AI TTS (ultra-low latency)
+uv run python scripts/process_epub.py book.epub --tts --engine hume --voice "Female English Actor"
 
 # Full pipeline with advanced UI
 uv run python scripts/process_epub.py book.epub --tts --images --ui-mode split-window
@@ -98,10 +107,34 @@ text_processing:
   spacy_model: "en_core_web_sm"
 
 tts:
+  engine: "kokoro"  # "kokoro", "elevenlabs", or "hume"
   voice: "bf_lily"
   speed: 1.1
   model_path: "./models/Kokoro-82M-8bit"
   use_mlx: true
+
+# Kokoro TTS settings (local engine)
+kokoro:
+  voice: "bf_lily"
+  speed: 1.1
+  model_path: "./models/Kokoro-82M-8bit"
+  use_mlx: true
+
+# ElevenLabs settings (cloud engine)
+elevenlabs:
+  api_key: "${ELEVENLABS_API_KEY}"  # Set via environment variable
+  voice: "Rachel"
+  model: "eleven_multilingual_v2"
+  stability: 0.5
+  similarity_boost: 0.75
+
+# Hume AI settings (ultra-low latency engine)
+hume:
+  api_key: "${HUME_API_KEY}"  # Set via environment variable
+  voice: "Female English Actor"
+  language: "en"  # en, es, fr, de, it, pt, ru, ja, ko, hi, ar
+  model: "octave-2"  # Latest model (40% faster, 50% lower cost)
+  streaming: false
 
 image_description:
   enabled: true
@@ -138,11 +171,31 @@ uv run python scripts/process_epub.py book.epub -c config/custom_config.yaml
 - **Classic Mode**: Traditional command-line progress bars
 - **Split-Window Mode**: Advanced terminal UI with real-time stats, progress tracking, and activity logs
 
-### Available Voices (Kokoro TTS)
+### Available Voices
+
+#### Kokoro TTS (Local)
 - **bf_lily**: Female British English (default)
 - **am_michael**: Male American English
 - **bf_emma**: Female British English (alternative)
 - **am_sarah**: Female American English
+
+#### ElevenLabs (Cloud - requires API key)
+- **Rachel**: Female American English (conversational)
+- **Adam**: Male American English (deep)
+- **Bella**: Female American English (soft)
+- **Antoni**: Male American English (warm)
+- Custom voice cloning available
+
+#### Hume AI (Cloud - requires API key)
+Ultra-low latency (<200ms) with emotion-aware synthesis:
+- **Female English Actor**: Expressive female English voice
+- **Male English Actor**: Expressive male English voice
+- **Female Spanish Actor**: Expressive female Spanish voice
+- **Male Spanish Actor**: Expressive male Spanish voice
+- Supports 11 languages: en, es, fr, de, it, pt, ru, ja, ko, hi, ar
+- Voice cloning support available
+- 40% faster than previous generation (Octave 1)
+- 50% lower cost than Octave 1
 
 ### VLM Models
 - **gemma-3n-e4b**: Lightweight vision model (default)
@@ -159,12 +212,17 @@ uv run python scripts/process_epub.py book.epub -c config/custom_config.yaml
                             │                                            │
                     ┌───────▼────────┐                         ┌────────▼────────┐
                     │ Image Pipeline │                         │  TTS Pipeline   │
-                    │ (Gemma/LLaVA)  │                         │(Kokoro+MLX Opt) │
+                    │ (Gemma/LLaVA)  │                         │   (Multi-Eng)   │
                     └────────────────┘                         └─────────────────┘
                             │                                            │
                     ┌───────▼────────┐                         ┌────────▼────────┐
-                    │Image Desc Text │                         │  Audio Files    │
-                    └────────────────┘                         │ + Merged Book   │
+                    │Image Desc Text │                         │ ┌─────────────┐ │
+                    └────────────────┘                         │ │Kokoro (MLX) │ │
+                                                               │ │ ElevenLabs  │ │
+                                                               │ │  Hume AI    │ │
+                                                               │ └─────────────┘ │
+                                                               │  Audio Files    │
+                                                               │ + Merged Book   │
                                                                └─────────────────┘
 ```
 
@@ -254,6 +312,65 @@ uv run python scripts/process_epub.py book.epub [OPTIONS]
 
 # Batch convert with advanced options
 uv run python scripts/batch_convert.py *.epub [OPTIONS]
+```
+
+### TTS Engine Examples
+
+#### Kokoro TTS (Local)
+```bash
+# Default local TTS
+uv run python scripts/process_epub.py book.epub --tts
+
+# With specific voice
+uv run python scripts/process_epub.py book.epub --tts --voice "bf_lily"
+
+# With speed adjustment
+uv run python scripts/process_epub.py book.epub --tts --voice "am_michael" --speed 1.2
+```
+
+#### ElevenLabs TTS (Cloud)
+```bash
+# Basic ElevenLabs usage (requires ELEVENLABS_API_KEY)
+uv run python scripts/process_epub.py book.epub --tts --engine elevenlabs --voice "Rachel"
+
+# With custom model and settings
+uv run python scripts/process_epub.py book.epub --tts --engine elevenlabs --voice "Adam" --model "eleven_turbo_v2"
+```
+
+#### Hume AI TTS (Cloud)
+```bash
+# Basic Hume usage (requires HUME_API_KEY)
+uv run python scripts/process_epub.py book.epub --tts --engine hume
+
+# With specific voice
+uv run python scripts/process_epub.py book.epub --tts --engine hume --voice "Female English Actor"
+
+# With different language
+uv run python scripts/process_epub.py book.epub --tts --engine hume --voice "Male Spanish Actor" --language es
+
+# With streaming mode for ultra-low latency
+uv run python scripts/process_epub.py book.epub --tts --engine hume --streaming
+
+# French audiobook
+uv run python scripts/process_epub.py livre.epub --tts --engine hume --language fr
+
+# Japanese audiobook
+uv run python scripts/process_epub.py book.epub --tts --engine hume --language ja
+```
+
+### API Key Setup
+```bash
+# Set up ElevenLabs API key
+export ELEVENLABS_API_KEY="your_elevenlabs_api_key_here"
+
+# Set up Hume AI API key
+export HUME_API_KEY="your_hume_api_key_here"
+
+# Or add to your shell profile (~/.bashrc, ~/.zshrc, etc.)
+echo 'export ELEVENLABS_API_KEY="your_key_here"' >> ~/.bashrc
+echo 'export HUME_API_KEY="your_key_here"' >> ~/.bashrc
+
+# Or use a secrets.json file (see Configuration section)
 ```
 
 ## Troubleshooting
