@@ -940,12 +940,12 @@ def create_tts_pipeline(config: TTSConfig, progress_tracker: Optional[ProgressTr
         progress_tracker: Optional progress tracking system
 
     Returns:
-        Initialized TTS pipeline (KokoroTTSPipeline or ElevenLabsTTSPipeline)
+        Initialized TTS pipeline (KokoroTTSPipeline, ElevenLabsTTSPipeline, or HumeTTSPipeline)
 
     Raises:
         RuntimeError: If no TTS engine is available
     """
-    from utils.secrets import has_elevenlabs_api_key
+    from utils.secrets import has_elevenlabs_api_key, has_hume_api_key
 
     # Determine which engine to use
     requested_engine = getattr(config, 'engine', 'kokoro')
@@ -966,6 +966,25 @@ def create_tts_pipeline(config: TTSConfig, progress_tracker: Optional[ProgressTr
             logger.warning(
                 "ElevenLabs TTS requested but no API key found. "
                 "Add 'elevenlabs_api_key' to secrets.json or set ELEVENLABS_API_KEY environment variable. "
+                "Falling back to Kokoro TTS."
+            )
+            return KokoroTTSPipeline(config, progress_tracker)
+
+    elif requested_engine == 'hume':
+        # User explicitly requested Hume
+        if has_hume_api_key():
+            try:
+                from pipelines.hume_tts_pipeline import create_hume_tts_pipeline
+                logger.info("Creating Hume TTS pipeline (user requested)")
+                return create_hume_tts_pipeline(config, progress_tracker)
+            except Exception as e:
+                logger.error(f"Failed to initialize Hume TTS: {e}")
+                logger.info("Falling back to Kokoro TTS")
+                return KokoroTTSPipeline(config, progress_tracker)
+        else:
+            logger.warning(
+                "Hume TTS requested but no API key found. "
+                "Add 'hume_api_key' to secrets.json or set HUME_API_KEY environment variable. "
                 "Falling back to Kokoro TTS."
             )
             return KokoroTTSPipeline(config, progress_tracker)
