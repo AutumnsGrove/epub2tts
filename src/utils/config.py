@@ -55,7 +55,7 @@ class ChapterConfig:
 class TTSConfig:
     """Configuration for TTS pipeline."""
     # Engine selection
-    engine: str = "kokoro"  # "kokoro" or "elevenlabs"
+    engine: str = "kokoro"  # "kokoro", "elevenlabs", or "hume"
 
     # Kokoro settings
     model: str = "kokoro"
@@ -78,6 +78,18 @@ class TTSConfig:
     elevenlabs_similarity_boost: float = 0.75
     elevenlabs_style: float = 0.0
     elevenlabs_max_chunk_chars: int = 2500
+
+    # Hume AI settings
+    hume_model: str = "octave-2"  # Octave 2 model
+    hume_voice_name: str = "Male English Actor"  # Default voice
+    hume_voice_provider: str = "HUME_AI"  # HUME_AI or CUSTOM_VOICE
+    hume_language: str = "en"  # en, es, fr, de, it, pt, ru, ja, ko, hi, ar
+    hume_speed: float = 1.0  # Speech rate control
+    hume_trailing_silence: float = 0.5  # Silence after speech in seconds
+    hume_output_format: str = "MP3"  # MP3, WAV, or PCM
+    hume_enable_streaming: bool = True  # Enable streaming for long content
+    hume_instant_mode: bool = False  # Ultra-low latency mode
+    hume_max_chunk_chars: int = 5000  # API character limit per chunk
 
     # Performance settings
     batch_size: int = 1
@@ -245,6 +257,10 @@ class ConfigManager:
 
     def _validate_config(self, config: Config) -> None:
         """Validate configuration values."""
+        # Validate TTS engine selection
+        if config.tts.engine not in ["kokoro", "elevenlabs", "hume"]:
+            raise ValueError(f"Invalid TTS engine: {config.tts.engine}")
+
         # Validate TTS settings
         if not (0.5 <= config.tts.speed <= 2.0):
             raise ValueError(f"TTS speed must be between 0.5 and 2.0, got {config.tts.speed}")
