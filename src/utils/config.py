@@ -95,6 +95,15 @@ class TTSConfig:
     batch_size: int = 1
     max_workers: int = 4
 
+    def __post_init__(self):
+        """Validate configuration after initialization."""
+        valid_engines = {"kokoro", "elevenlabs", "hume"}
+        if self.engine not in valid_engines:
+            raise ValueError(
+                f"Invalid TTS engine: '{self.engine}'. "
+                f"Must be one of: {', '.join(sorted(valid_engines))}"
+            )
+
 
 @dataclass
 class ImageConfig:

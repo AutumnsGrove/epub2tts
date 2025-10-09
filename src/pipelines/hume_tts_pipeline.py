@@ -20,7 +20,7 @@ from tqdm import tqdm
 
 # Hume AI imports
 from hume.client import HumeClient
-from hume.models import PostedUtteranceVoiceWithName
+from hume.tts import PostedUtteranceVoiceWithName
 
 from utils.config import TTSConfig
 from utils.logger import PerformanceLogger, ProgressLogger
