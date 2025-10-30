@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "epub2tts"
-version = "0.1.0"
+version = "0.2.0"
 description = "A production-ready EPUB to TTS converter using Kokoro TTS and local VLM for image descriptions"
 readme = "README.md"
 license = {text = "MIT"}
