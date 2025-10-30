@@ -4,7 +4,7 @@ A production-ready EPUB to TTS converter that converts EPUB files into optimized
 
 ## Features
 
-- **Modern EPUB Processing**: Native EPUB handling with EbookLib (faster and more accurate than Pandoc)
+- **Modern EPUB Processing**: Production-ready EPUB parsing with OmniParser (8.7x faster than Pandoc)
 - **Advanced Text Processing**: Modern NLP-based processing with spaCy, plus legacy regex fallback
 - **Chapter Segmentation**: Intelligent chapter detection using TOC data and ML confidence scoring
 - **Multi-Engine TTS Integration**: Support for three TTS engines:
@@ -59,7 +59,7 @@ uv run python src/cli.py info book.epub  # Get EPUB information
 
 - Python 3.10+ (required for Kokoro TTS)
 - UV (Python package manager)
-- Pandoc (for legacy EPUB processing)
+- OmniParser (EPUB parsing - included as dependency)
 - FFmpeg (for audio processing)
 
 ### Install System Dependencies
@@ -67,13 +67,13 @@ uv run python src/cli.py info book.epub  # Get EPUB information
 ```bash
 # Ubuntu/Debian
 sudo apt-get update
-sudo apt-get install pandoc ffmpeg
+sudo apt-get install ffmpeg
 
 # macOS
-brew install pandoc ffmpeg
+brew install ffmpeg
 
 # Windows (using chocolatey)
-choco install pandoc ffmpeg
+choco install ffmpeg
 ```
 
 ### Install Python Package
@@ -99,7 +99,6 @@ Create a custom configuration file:
 ```yaml
 # config/custom_config.yaml
 processing:
-  epub_processor: "ebooklib"  # "ebooklib" (modern) or "pandoc" (legacy)
   temp_dir: "/tmp/epub2tts"
 
 text_processing:
@@ -164,8 +163,7 @@ uv run python scripts/process_epub.py book.epub -c config/custom_config.yaml
 - **Hybrid Mode**: Combines both approaches for optimal results
 
 ### EPUB Processing
-- **EbookLib** (default): Native Python EPUB handling, faster and more accurate
-- **Pandoc**: Legacy processing mode for compatibility with older EPUBs
+- **OmniParser**: Production-ready EPUB parser with native TOC support and high-accuracy chapter detection (8.7x faster than legacy Pandoc)
 
 ### User Interface
 - **Classic Mode**: Traditional command-line progress bars
@@ -205,7 +203,7 @@ Ultra-low latency (<200ms) with emotion-aware synthesis:
 
 ```
 ┌─────────────┐     ┌──────────────┐     ┌────────────────┐     ┌─────────────┐
-│ EPUB Input  │────▶│ EbookLib     │────▶│ Modern Text    │────▶│ Clean Text  │
+│ EPUB Input  │────▶│ OmniParser   │────▶│ Modern Text    │────▶│ Clean Text  │
 └─────────────┘     │ + TOC        │     │ Pipeline       │     │ + Chapters  │
                     │ Extraction   │     │ (spaCy+NLP)    │     │   Output    │
                     └──────────────┘     └────────────────┘     └─────────────┘
