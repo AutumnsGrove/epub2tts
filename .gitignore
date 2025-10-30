@@ -102,8 +102,8 @@ tests/fixtures/test_images/*.png
 temp/
 epub2tts_full.log
 
-# Development checkpoints and test outputs
-checkpoints/
-test_tts_output/
+# Development checkpoints and test outputs (root level only)
+/checkpoints/
+/test_tts_output/
 baseline_*.txt
 comparison_*.json
