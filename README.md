@@ -357,6 +357,8 @@ uv run python scripts/process_epub.py book.epub --tts --engine hume --language j
 ```
 
 ### API Key Setup
+
+#### Option 1: Environment Variables
 ```bash
 # Set up ElevenLabs API key
 export ELEVENLABS_API_KEY="your_elevenlabs_api_key_here"
@@ -367,9 +369,23 @@ export HUME_API_KEY="your_hume_api_key_here"
 # Or add to your shell profile (~/.bashrc, ~/.zshrc, etc.)
 echo 'export ELEVENLABS_API_KEY="your_key_here"' >> ~/.bashrc
 echo 'export HUME_API_KEY="your_key_here"' >> ~/.bashrc
-
-# Or use a secrets.json file (see Configuration section)
 ```
+
+#### Option 2: secrets.json File (Recommended)
+```bash
+# Copy the template to create your secrets file
+cp secrets_template.json secrets.json
+
+# Edit secrets.json with your API keys
+# {
+#   "elevenlabs_api_key": "your_elevenlabs_api_key_here",
+#   "hume_api_key": "your_hume_api_key_here",
+#   "anthropic_api_key": "your_anthropic_api_key_here",
+#   "comment": "Add your API keys here. This file should be kept private."
+# }
+```
+
+**Note**: The `secrets.json` file is already in `.gitignore` to prevent accidentally committing API keys to version control.
 
 ## Troubleshooting
 
