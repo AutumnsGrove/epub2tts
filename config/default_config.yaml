@@ -1,7 +1,5 @@
 # Processing settings
 processing:
-  epub_processor: "ebooklib"  # "ebooklib" (modern, native) or "pandoc" (legacy)
-  pandoc_path: "pandoc"  # or full path (only used if epub_processor is "pandoc")
   temp_dir: "/tmp/epub2tts"
   max_parallel_jobs: 4
 
@@ -23,7 +21,7 @@ cleaning:
 # Chapter detection (enhanced with modern options)
 chapters:
   detect_by_headings: true
-  use_toc_when_available: true  # Use TOC from EbookLib for accurate boundaries
+  use_toc_when_available: true  # Use TOC from OmniParser for accurate boundaries
   min_words_per_chapter: 100
   max_words_per_chunk: 5000  # For very long chapters
   confidence_threshold: 0.6  # Minimum confidence for chapter detection
