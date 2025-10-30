@@ -2,19 +2,19 @@
 Main EPUB processing module.
 
 This module orchestrates the entire EPUB to text conversion process,
-integrating Pandoc extraction, text cleaning, and chapter segmentation.
+using OmniParser for EPUB extraction and text cleaning for TTS optimization.
 """
 
 import logging
-import tempfile
+import time
 from pathlib import Path
 from typing import Dict, List, Optional, Any
 from dataclasses import dataclass, asdict
 import json
 import shutil
 
-from core.pandoc_wrapper import PandocConverter, PandocError
-from core.ebooklib_processor import EbookLibProcessor
+from omniparser import parse_document
+from omniparser.models import Document as OmniDocument
 from core.text_cleaner import TextCleaner, Chapter, CleaningStats
 from utils.config import Config
 
@@ -50,12 +50,12 @@ class ProcessingResult:
 
 class EPUBProcessor:
     """
-    Main processor for EPUB to text conversion.
+    Main processor for EPUB to text conversion using OmniParser.
     """
 
     def __init__(self, config: Config, progress_tracker=None):
         """
-        Initialize EPUB processor with configuration.
+        Initialize EPUB processor with OmniParser and text cleaning.
 
         Args:
             config: Configuration object
@@ -64,28 +64,83 @@ class EPUBProcessor:
         self.config = config
         self.progress_tracker = progress_tracker
 
-        # Determine which processor to use
-        processor_type = getattr(config.processing, 'epub_processor', 'pandoc')
-
-        if processor_type == 'ebooklib':
-            logger.info("Using EbookLib processor for modern EPUB handling")
-            self.processor = EbookLibProcessor(config, progress_tracker=self.progress_tracker)
-            self.use_ebooklib = True
-        else:
-            logger.info("Using Pandoc processor for legacy EPUB handling")
-            self.processor = PandocConverter(config.processing.pandoc_path)
-            self.cleaner = TextCleaner()
-            self.use_ebooklib = False
+        # Initialize text cleaner for epub2tts-specific cleaning
+        self.cleaner = TextCleaner()
 
         # Create temp directory if needed
         self.temp_dir = Path(config.processing.temp_dir)
         self.temp_dir.mkdir(parents=True, exist_ok=True)
 
-        logger.info(f"EPUB processor initialized with temp dir: {self.temp_dir}")
+        logger.info(f"EPUB processor initialized with OmniParser and temp dir: {self.temp_dir}")
+
+    def _omni_to_epub2tts_chapter(self, omni_chapter, chapter_num: int) -> Chapter:
+        """
+        Convert OmniParser Chapter to epub2tts Chapter.
+
+        Args:
+            omni_chapter: OmniParser chapter object
+            chapter_num: Chapter number
+
+        Returns:
+            epub2tts Chapter object
+        """
+        estimated_duration = omni_chapter.word_count / 200.0  # 200 WPM
+        return Chapter(
+            chapter_num=chapter_num,
+            title=omni_chapter.title,
+            content=omni_chapter.content,
+            word_count=omni_chapter.word_count,
+            estimated_duration=estimated_duration,
+            confidence=1.0  # OmniParser has high confidence from TOC
+        )
+
+    def _omni_metadata_to_dict(self, omni_metadata) -> Dict[str, Any]:
+        """
+        Convert OmniParser Metadata to dictionary.
+
+        Args:
+            omni_metadata: OmniParser metadata object
+
+        Returns:
+            Metadata dictionary
+        """
+        return {
+            'title': omni_metadata.title,
+            'author': omni_metadata.author,
+            'authors': omni_metadata.authors or [omni_metadata.author] if omni_metadata.author else [],
+            'publisher': omni_metadata.publisher,
+            'publication_date': str(omni_metadata.publication_date) if omni_metadata.publication_date else None,
+            'language': omni_metadata.language,
+            'identifier': omni_metadata.isbn,
+            'description': omni_metadata.description,
+            'subjects': omni_metadata.tags or [],
+            'original_format': 'epub',
+            'file_size': omni_metadata.file_size
+        }
+
+    def _omni_images_to_list(self, omni_images) -> List[Dict[str, Any]]:
+        """
+        Convert OmniParser ImageReferences to list of dicts.
+
+        Args:
+            omni_images: List of OmniParser image references
+
+        Returns:
+            List of image info dictionaries
+        """
+        return [
+            {
+                'file_path': img.file_path,
+                'alt_text': img.alt_text or '',
+                'position': img.position,
+                'format': img.format
+            }
+            for img in omni_images
+        ]
 
     def process_epub(self, epub_path: Path, output_dir: Optional[Path] = None) -> ProcessingResult:
         """
-        Process EPUB file through complete pipeline.
+        Process EPUB file using OmniParser.
 
         Args:
             epub_path: Path to EPUB file
@@ -94,7 +149,8 @@ class EPUBProcessor:
         Returns:
             ProcessingResult with all extracted and processed data
         """
-        logger.info(f"Starting EPUB processing: {epub_path}")
+        logger.info(f"Starting EPUB processing with OmniParser: {epub_path}")
+        start_time = time.time()
 
         if not epub_path.exists():
             error_msg = f"EPUB file not found: {epub_path}"
@@ -109,93 +165,71 @@ class EPUBProcessor:
                 error_message=error_msg
             )
 
-        # Delegate to the appropriate processor
-        if self.use_ebooklib:
-            return self.processor.process_epub(epub_path, output_dir)
-        else:
-            return self._process_epub_pandoc(epub_path, output_dir)
-
-    def _process_epub_pandoc(self, epub_path: Path, output_dir: Optional[Path] = None) -> ProcessingResult:
-        """
-        Process EPUB file using Pandoc (legacy method).
-
-        Args:
-            epub_path: Path to EPUB file
-            output_dir: Optional output directory for results
-
-        Returns:
-            ProcessingResult with all extracted and processed data
-        """
-        import time
-        start_time = time.time()
-
-        temp_media_dir = None
-
         try:
-            # Step 1: Extract metadata
-            logger.info("Extracting metadata...")
-            metadata = self.processor.extract_metadata(epub_path)
+            # Parse with OmniParser
+            logger.info(f"Parsing EPUB with OmniParser: {epub_path}")
+            omni_doc = parse_document(epub_path)
 
-            # Step 2: Convert to markdown
-            logger.info("Converting EPUB to markdown...")
-            markdown_content, temp_media_dir = self.processor.extract_to_markdown(
-                epub_path,
-                extract_images=self.config.image_description.enabled
-            )
+            # Convert chapters
+            logger.info(f"Converting {len(omni_doc.chapters)} chapters from OmniParser format")
+            chapters = [
+                self._omni_to_epub2tts_chapter(ch, idx + 1)
+                for idx, ch in enumerate(omni_doc.chapters)
+            ]
 
-            # Step 3: Extract image information
-            image_info = []
-            if self.config.image_description.enabled:
-                logger.info("Extracting image information...")
-                image_info = self.processor.extract_images_info(epub_path)
-
-            # Step 4: Clean text
-            logger.info("Cleaning text...")
-            cleaned_text = self.cleaner.clean_text(markdown_content)
+            # Apply epub2tts text cleaning to full content
+            logger.info("Applying epub2tts text cleaning...")
+            cleaned_content = self.cleaner.clean_text(omni_doc.content)
             cleaning_stats = self.cleaner.get_cleaning_stats()
 
-            # Step 5: Segment chapters
-            logger.info("Segmenting chapters...")
-            chapters = self.cleaner.segment_chapters(cleaned_text)
+            # Clean chapter content too
+            logger.info("Cleaning individual chapter content...")
+            for chapter in chapters:
+                chapter.content = self.cleaner.clean_text(chapter.content)
 
-            # Step 6: Apply chapter-specific processing
+            # Convert metadata
+            metadata_dict = self._omni_metadata_to_dict(omni_doc.metadata)
+
+            # Convert images
+            image_info = self._omni_images_to_list(omni_doc.images)
+
+            # Apply chapter post-processing
             chapters = self._post_process_chapters(chapters)
-
-            # Step 7: Save results if output directory specified
-            copied_image_paths = {}
-            if output_dir:
-                copied_image_paths = self._save_results(
-                    epub_path,
-                    output_dir,
-                    cleaned_text,
-                    chapters,
-                    metadata,
-                    image_info,
-                    temp_media_dir
-                ) or {}
 
             processing_time = time.time() - start_time
 
             result = ProcessingResult(
                 success=True,
-                text_content=cleaned_text,
+                text_content=cleaned_content,
                 chapters=chapters,
-                metadata=metadata,
+                metadata=metadata_dict,
                 image_info=image_info,
                 cleaning_stats=cleaning_stats,
+                error_message=None,
                 processing_time=processing_time
             )
 
-            logger.info(
-                f"EPUB processing completed successfully in {processing_time:.2f}s: "
-                f"{len(chapters)} chapters, {len(cleaned_text)} characters"
-            )
+            # Save results if output directory specified
+            if output_dir:
+                self._save_results(
+                    epub_path,
+                    output_dir,
+                    result.text_content,
+                    result.chapters,
+                    result.metadata,
+                    result.image_info
+                )
 
+            logger.info(
+                f"Successfully processed {epub_path} in {processing_time:.2f}s: "
+                f"{len(chapters)} chapters, {len(cleaned_content)} characters"
+            )
             return result
 
         except Exception as e:
-            error_msg = f"Error processing EPUB {epub_path}: {e}"
+            error_msg = f"Error processing EPUB {epub_path}: {str(e)}"
             logger.error(error_msg, exc_info=True)
+            processing_time = time.time() - start_time
 
             return ProcessingResult(
                 success=False,
@@ -205,17 +239,8 @@ class EPUBProcessor:
                 image_info=[],
                 cleaning_stats=CleaningStats(0, 0, 0, 0, 1),
                 error_message=error_msg,
-                processing_time=time.time() - start_time
+                processing_time=processing_time
             )
-
-        finally:
-            # Cleanup temporary files
-            if temp_media_dir and temp_media_dir.exists():
-                try:
-                    shutil.rmtree(temp_media_dir)
-                    logger.debug(f"Cleaned up temp media directory: {temp_media_dir}")
-                except Exception as e:
-                    logger.warning(f"Failed to cleanup temp directory: {e}")
 
     def _post_process_chapters(self, chapters: List[Chapter]) -> List[Chapter]:
         """
@@ -306,8 +331,7 @@ class EPUBProcessor:
         text_content: str,
         chapters: List[Chapter],
         metadata: Dict[str, Any],
-        image_info: List[Dict[str, Any]],
-        temp_media_dir: Optional[Path] = None
+        image_info: List[Dict[str, Any]]
     ) -> None:
         """
         Save processing results to output directory.
@@ -369,50 +393,32 @@ class EPUBProcessor:
                     f.write(f"  Words: {chapter.word_count}\n")
                     f.write(f"  Estimated duration: {chapter.estimated_duration:.1f} minutes\n\n")
 
-        # Copy images if they were extracted - DO THIS BEFORE ANY CLEANUP
-        copied_image_paths = {}
-        if temp_media_dir and temp_media_dir.exists() and image_info:
+        # Copy images from OmniParser's extracted paths if they exist
+        if image_info:
             images_dir = output_dir / f"{base_name}_images"
             images_dir.mkdir(exist_ok=True)
 
-            # Look for images in the media directory
-            media_files = list(temp_media_dir.glob("**/*"))
-            image_extensions = {'.png', '.jpg', '.jpeg', '.gif', '.svg', '.webp', '.bmp'}
-
             copied_count = 0
-            for media_file in media_files:
-                if media_file.is_file() and media_file.suffix.lower() in image_extensions:
-                    dest_file = images_dir / media_file.name
-                    shutil.copy2(media_file, dest_file)
+            for info in image_info:
+                source_path = Path(info.get('file_path', ''))
+                if source_path.exists() and source_path.is_file():
+                    dest_file = images_dir / source_path.name
+                    shutil.copy2(source_path, dest_file)
 
-                    # Track the mapping of old path to new path
-                    copied_image_paths[str(media_file)] = str(dest_file)
-                    copied_image_paths[media_file.name] = str(dest_file)
-
+                    # Update paths to the permanent location
+                    info['file_path'] = str(dest_file)
+                    info['local_path'] = str(dest_file)
                     copied_count += 1
-                    logger.debug(f"Copied image: {media_file.name} -> {dest_file}")
+                    logger.debug(f"Copied image: {source_path.name} -> {dest_file}")
 
             if copied_count > 0:
                 logger.info(f"Copied {copied_count} images to {images_dir}")
 
-            # Update image_info with new persistent paths
-            for info in image_info:
-                old_path = info.get('file_path', '')
-                filename = Path(old_path).name
-
-                if filename in copied_image_paths:
-                    info['file_path'] = copied_image_paths[filename]
-                    info['local_path'] = copied_image_paths[filename]
-                    logger.debug(f"Updated image path: {filename} -> {info['file_path']}")
-
         logger.info(f"Results saved to {output_dir}")
-
-        # Return the updated image paths for the orchestrator
-        return copied_image_paths
 
     def validate_epub(self, epub_path: Path) -> List[str]:
         """
-        Validate EPUB file and return any issues found.
+        Validate EPUB file using OmniParser.
 
         Args:
             epub_path: Path to EPUB file
@@ -420,45 +426,42 @@ class EPUBProcessor:
         Returns:
             List of validation issues (empty if valid)
         """
-        if self.use_ebooklib:
-            return self.processor.validate_epub(epub_path)
-        else:
-            issues = []
+        issues = []
 
-            # Check file exists
-            if not epub_path.exists():
-                issues.append(f"File does not exist: {epub_path}")
-                return issues
-
-            # Check file extension
-            if epub_path.suffix.lower() != '.epub':
-                issues.append(f"File does not have .epub extension: {epub_path}")
-
-            # Check file size
-            try:
-                file_size = epub_path.stat().st_size
-                if file_size == 0:
-                    issues.append("File is empty")
-                elif file_size < 1024:  # Less than 1KB
-                    issues.append("File is suspiciously small")
-            except Exception as e:
-                issues.append(f"Cannot read file stats: {e}")
-
-            # Try to extract metadata to validate format
-            try:
-                metadata = self.processor.extract_metadata(epub_path)
-                if not metadata:
-                    issues.append("No metadata found - file may be corrupted")
-            except PandocError as e:
-                issues.append(f"Pandoc validation failed: {e}")
-            except Exception as e:
-                issues.append(f"Unexpected validation error: {e}")
-
+        # Check file exists
+        if not epub_path.exists():
+            issues.append(f"File does not exist: {epub_path}")
             return issues
+
+        # Check file extension
+        if epub_path.suffix.lower() != '.epub':
+            issues.append(f"File does not have .epub extension: {epub_path}")
+
+        # Check file size
+        try:
+            file_size = epub_path.stat().st_size
+            if file_size == 0:
+                issues.append("File is empty")
+            elif file_size < 1024:  # Less than 1KB
+                issues.append("File is suspiciously small")
+        except Exception as e:
+            issues.append(f"Cannot read file stats: {e}")
+
+        # Try to parse with OmniParser to validate format
+        try:
+            omni_doc = parse_document(epub_path)
+            if not omni_doc.metadata or not omni_doc.metadata.title:
+                issues.append("No title metadata found - file may be corrupted")
+            if not omni_doc.content or len(omni_doc.content.strip()) == 0:
+                issues.append("No text content found - file may be corrupted")
+        except Exception as e:
+            issues.append(f"OmniParser validation failed: {e}")
+
+        return issues
 
     def get_processing_info(self, epub_path: Path) -> Dict[str, Any]:
         """
-        Get information about EPUB without full processing.
+        Get information about EPUB using OmniParser without full processing.
 
         Args:
             epub_path: Path to EPUB file
@@ -466,42 +469,35 @@ class EPUBProcessor:
         Returns:
             Dictionary with basic information
         """
-        if self.use_ebooklib:
-            return self.processor.get_processing_info(epub_path)
-        else:
-            try:
-                # Get file stats
-                file_stats = epub_path.stat()
+        try:
+            # Get file stats
+            file_stats = epub_path.stat()
 
-                # Get metadata
-                metadata = self.processor.extract_metadata(epub_path)
+            # Parse with OmniParser for quick metadata extraction
+            omni_doc = parse_document(epub_path)
 
-                # Quick text extraction for size estimation
-                markdown_content, temp_media_dir = self.processor.extract_to_markdown(
-                    epub_path, extract_images=False
-                )
+            # Convert metadata
+            metadata = self._omni_metadata_to_dict(omni_doc.metadata)
 
-                # Cleanup temp directory
-                if temp_media_dir and temp_media_dir.exists():
-                    shutil.rmtree(temp_media_dir)
+            # Get content metrics
+            text_length = len(omni_doc.content)
+            estimated_words = omni_doc.metadata.word_count or len(omni_doc.content.split())
+            estimated_processing_time = text_length / 10000  # Rough estimate
 
-                # Estimate processing metrics
-                text_length = len(markdown_content)
-                estimated_words = len(markdown_content.split())
-                estimated_processing_time = text_length / 10000  # Rough estimate
+            info = {
+                'file_size': file_stats.st_size,
+                'file_modified': file_stats.st_mtime,
+                'metadata': metadata,
+                'chapter_count': len(omni_doc.chapters),
+                'image_count': len(omni_doc.images),
+                'estimated_text_length': text_length,
+                'estimated_word_count': estimated_words,
+                'estimated_processing_time': estimated_processing_time,
+                'estimated_audio_duration': estimated_words / 200.0  # minutes at 200 WPM
+            }
 
-                info = {
-                    'file_size': file_stats.st_size,
-                    'file_modified': file_stats.st_mtime,
-                    'metadata': metadata,
-                    'estimated_text_length': text_length,
-                    'estimated_word_count': estimated_words,
-                    'estimated_processing_time': estimated_processing_time,
-                    'estimated_audio_duration': estimated_words / 200.0  # minutes
-                }
+            return info
 
-                return info
-
-            except Exception as e:
-                logger.error(f"Error getting EPUB info: {e}")
-                return {'error': str(e)}
+        except Exception as e:
+            logger.error(f"Error getting EPUB info: {e}")
+            return {'error': str(e)}
