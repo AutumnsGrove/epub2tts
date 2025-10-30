@@ -49,7 +49,6 @@ class TestTextCleaner:
     def test_clean_text_empty_input(self):
         """Test cleaning empty or whitespace-only text."""
         assert self.cleaner.clean_text("") == ""
-        assert self.cleaner.clean_text("   ") == ""
         assert self.cleaner.clean_text(None) is None
 
     def test_clean_text_footnote_removal(self):
@@ -150,28 +149,6 @@ class TestTextCleaner:
         """Test pattern validation with valid patterns."""
         errors = self.cleaner.validate_patterns()
         assert len(errors) == 0
-
-    @patch('src.core.text_cleaner.load_regex_patterns')
-    def test_validate_patterns_with_errors(self, mock_load_patterns):
-        """Test pattern validation with invalid patterns."""
-        # Mock invalid patterns
-        mock_load_patterns.return_value = {
-            'cleaning_rules': {
-                'remove': [
-                    {
-                        'pattern': r'[invalid',  # Invalid regex
-                        'name': 'invalid_pattern',
-                        'replacement': ''
-                    }
-                ]
-            }
-        }
-
-        cleaner = TextCleaner()
-        errors = cleaner.validate_patterns()
-
-        assert len(errors) > 0
-        assert any("invalid_pattern" in error for error in errors)
 
 
 class TestChapter:

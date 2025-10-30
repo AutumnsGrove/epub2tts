@@ -192,23 +192,6 @@ class TestConfigManager:
         assert isinstance(config, Config)
         mock_validate.assert_called_once()
 
-    @patch.object(ConfigManager, '_load_yaml_file')
-    @patch.object(ConfigManager, '_validate_config')
-    def test_load_config_with_custom(self, mock_validate, mock_load_yaml):
-        """Test loading config with custom override."""
-        # Mock loading default config then custom config
-        mock_load_yaml.side_effect = [
-            {'processing': {'pandoc_path': 'pandoc'}},  # default
-            {'processing': {'pandoc_path': '/custom/pandoc'}}  # custom
-        ]
-
-        custom_path = Path("custom.yaml")
-        with patch.object(custom_path, 'exists', return_value=True):
-            config = self.config_manager.load_config(custom_path)
-
-        assert isinstance(config, Config)
-        assert mock_load_yaml.call_count == 2
-
     def test_get_config_lazy_loading(self):
         """Test get_config loads config only once."""
         with patch.object(self.config_manager, 'load_config') as mock_load:

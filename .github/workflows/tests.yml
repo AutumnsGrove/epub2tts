@@ -26,38 +26,34 @@ jobs:
         sudo apt-get update
         sudo apt-get install -y pandoc ffmpeg
 
-    - name: Cache pip dependencies
-      uses: actions/cache@v3
+    - name: Install uv
+      uses: astral-sh/setup-uv@v4
       with:
-        path: ~/.cache/pip
-        key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
-        restore-keys: |
-          ${{ runner.os }}-pip-
+        enable-cache: true
+        cache-dependency-glob: "uv.lock"
 
     - name: Install Python dependencies
       run: |
-        python -m pip install --upgrade pip
-        pip install -r requirements.txt
-        pip install -e .
+        uv sync --all-extras --dev
 
     - name: Lint with flake8
       run: |
         # Stop the build if there are Python syntax errors or undefined names
-        flake8 src --count --select=E9,F63,F7,F82 --show-source --statistics
+        uv run flake8 src --count --select=E9,F63,F7,F82 --show-source --statistics
         # Exit-zero treats all errors as warnings
-        flake8 src --count --exit-zero --max-complexity=10 --max-line-length=100 --statistics
+        uv run flake8 src --count --exit-zero --max-complexity=10 --max-line-length=100 --statistics
 
     - name: Check code formatting with black
       run: |
-        black --check src tests scripts
+        uv run black --check src tests scripts
 
     - name: Type checking with mypy
       run: |
-        mypy src --ignore-missing-imports
+        uv run mypy src --ignore-missing-imports
 
     - name: Test with pytest
       run: |
-        pytest tests/ --cov=src --cov-report=xml --cov-report=term-missing
+        uv run pytest tests/ --cov=src --cov-report=xml --cov-report=term-missing
 
     - name: Upload coverage to Codecov
       uses: codecov/codecov-action@v3
@@ -84,21 +80,25 @@ jobs:
         sudo apt-get update
         sudo apt-get install -y pandoc ffmpeg
 
+    - name: Install uv
+      uses: astral-sh/setup-uv@v4
+      with:
+        enable-cache: true
+        cache-dependency-glob: "uv.lock"
+
     - name: Install Python dependencies
       run: |
-        python -m pip install --upgrade pip
-        pip install -r requirements.txt
-        pip install -e .
+        uv sync --all-extras --dev
 
     - name: Run integration tests
       run: |
-        pytest tests/integration/ -v --tb=short
+        uv run pytest tests/integration/ -v --tb=short
 
     - name: Test CLI commands
       run: |
-        python scripts/process_epub.py --help
-        python scripts/batch_convert.py --help
-        python -m src.cli --help
+        uv run python scripts/process_epub.py --help
+        uv run python scripts/batch_convert.py --help
+        uv run python -m src.cli --help
 
   security-scan:
     runs-on: ubuntu-latest
@@ -111,10 +111,12 @@ jobs:
       with:
         python-version: 3.11
 
+    - name: Install uv
+      uses: astral-sh/setup-uv@v4
+
     - name: Install dependencies
       run: |
-        python -m pip install --upgrade pip
-        pip install safety bandit
+        uv pip install safety bandit --system
 
     - name: Security scan with Safety
       run: |
