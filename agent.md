@@ -45,8 +45,7 @@ epub2tts/
 │   ├── cli.py                 # Main CLI interface
 │   ├── core/                  # Core processing
 │   │   ├── epub_processor.py  # Main orchestrator
-│   │   ├── ebooklib_processor.py  # Modern EPUB handling
-│   │   ├── pandoc_wrapper.py  # Legacy EPUB processing
+│   │   ├── omniparser_processor.py  # OmniParser EPUB handling
 │   │   └── text_cleaner.py    # Text cleaning pipeline
 │   ├── pipelines/             # Processing pipelines
 │   │   ├── tts_pipeline.py    # Kokoro TTS integration
@@ -68,7 +67,7 @@ epub2tts/
 
 ### Data Flow
 ```
-EPUB → EbookLib → Modern Text Pipeline → Clean Text + Chapters
+EPUB → OmniParser → Modern Text Pipeline → Clean Text + Chapters
   ↓                     ↓                     ↓
 Images → VLM Pipeline → Image Descriptions    ↓
                                           TTS Pipeline → Audio Files
@@ -86,7 +85,6 @@ Images → VLM Pipeline → Image Descriptions    ↓
 ```yaml
 # EPUB Processing
 processing:
-  epub_processor: "ebooklib"  # or "pandoc" for legacy
   temp_dir: "/tmp/epub2tts"
 
 # Text Processing
@@ -260,11 +258,10 @@ cat secrets.json  # Should contain elevenlabs_api_key
 
 #### EPUB Processing Issues
 ```bash
-# Try different processors
-# Set epub_processor: "pandoc" for legacy EPUBs
-
 # Check EPUB validity
 uv run python src/cli.py validate book.epub
+
+# OmniParser handles all EPUB versions automatically
 ```
 
 ### Performance Tips
@@ -318,6 +315,6 @@ output/
 
 ---
 
-**Version**: 0.1.0
-**Last Updated**: 2025-09-28
-**Dependencies**: Python 3.10+, UV, Pandoc, FFmpeg
+**Version**: 0.2.0
+**Last Updated**: 2025-10-29
+**Dependencies**: Python 3.10+, UV, OmniParser, FFmpeg
