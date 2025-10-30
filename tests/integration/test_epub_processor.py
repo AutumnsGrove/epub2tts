@@ -24,13 +24,10 @@ class TestEPUBProcessor:
     def test_processor_initialization(self):
         """Test EPUBProcessor initialization."""
         assert self.processor.config == self.config
-        assert self.processor.pandoc is not None
         assert self.processor.cleaner is not None
         assert self.processor.temp_dir.exists()
 
-    @patch('src.core.epub_processor.PandocConverter')
-    @patch('src.core.epub_processor.TextCleaner')
-    def test_process_epub_file_not_found(self, mock_cleaner, mock_pandoc):
+    def test_process_epub_file_not_found(self):
         """Test processing non-existent EPUB file."""
         non_existent_path = Path("/non/existent/file.epub")
 
@@ -41,24 +38,43 @@ class TestEPUBProcessor:
         assert result.text_content == ""
         assert len(result.chapters) == 0
 
-    @patch('src.core.epub_processor.PandocConverter')
-    @patch('src.core.epub_processor.TextCleaner')
-    def test_process_epub_success(self, mock_cleaner_class, mock_pandoc_class):
+    @patch('src.core.epub_processor.parse_document')
+    def test_process_epub_success(self, mock_parse):
         """Test successful EPUB processing."""
-        # Setup mocks
-        mock_pandoc = Mock()
-        mock_pandoc_class.return_value = mock_pandoc
-        mock_pandoc.extract_metadata.return_value = {"title": "Test Book"}
-        mock_pandoc.extract_to_markdown.return_value = ("# Chapter 1\nContent", Path("/tmp/media"))
-        mock_pandoc.extract_images_info.return_value = [{"file_path": "image.jpg"}]
+        # Create mock OmniParser Document
+        mock_doc = Mock()
+        mock_doc.content = "Chapter 1 content here"
 
-        mock_cleaner = Mock()
-        mock_cleaner_class.return_value = mock_cleaner
-        mock_cleaner.clean_text.return_value = "Cleaned content"
-        mock_cleaner.get_cleaning_stats.return_value = CleaningStats(100, 90, 5, 3, 0)
-        mock_cleaner.segment_chapters.return_value = [
-            Chapter(1, "Chapter 1", "Content", 50, 2.5)
-        ]
+        # Mock metadata
+        mock_metadata = Mock()
+        mock_metadata.title = "Test Book"
+        mock_metadata.author = "Test Author"
+        mock_metadata.authors = ["Test Author"]
+        mock_metadata.publisher = None
+        mock_metadata.publication_date = None
+        mock_metadata.language = "en"
+        mock_metadata.isbn = None
+        mock_metadata.description = None
+        mock_metadata.tags = []
+        mock_metadata.file_size = 1024
+        mock_doc.metadata = mock_metadata
+
+        # Mock chapters - Make word_count high enough to pass min_words_per_chapter filter
+        mock_chapter = Mock()
+        mock_chapter.title = "Chapter 1"
+        mock_chapter.content = "word " * 150  # 150 words (well above default minimum)
+        mock_chapter.word_count = 150
+        mock_doc.chapters = [mock_chapter]
+
+        # Mock images
+        mock_image = Mock()
+        mock_image.file_path = "image.jpg"
+        mock_image.alt_text = ""
+        mock_image.position = 0
+        mock_image.format = "jpg"
+        mock_doc.images = [mock_image]
+
+        mock_parse.return_value = mock_doc
 
         # Create temporary EPUB file
         with tempfile.NamedTemporaryFile(suffix='.epub', delete=False) as tmp_file:
@@ -68,7 +84,7 @@ class TestEPUBProcessor:
             result = self.processor.process_epub(epub_path)
 
             assert result.success is True
-            assert result.text_content == "Cleaned content"
+            assert result.text_content != ""  # Content will be cleaned
             assert len(result.chapters) == 1
             assert result.chapters[0].title == "Chapter 1"
             assert result.metadata["title"] == "Test Book"
@@ -78,12 +94,11 @@ class TestEPUBProcessor:
         finally:
             epub_path.unlink()
 
-    @patch('src.core.epub_processor.PandocConverter')
-    def test_process_epub_pandoc_error(self, mock_pandoc_class):
-        """Test EPUB processing with Pandoc error."""
-        mock_pandoc = Mock()
-        mock_pandoc_class.return_value = mock_pandoc
-        mock_pandoc.extract_metadata.side_effect = Exception("Pandoc failed")
+    @patch('src.core.epub_processor.parse_document')
+    def test_process_epub_parsing_error(self, mock_parse):
+        """Test EPUB processing with OmniParser error."""
+        # Simulate parsing error
+        mock_parse.side_effect = Exception("OmniParser parsing failed")
 
         with tempfile.NamedTemporaryFile(suffix='.epub', delete=False) as tmp_file:
             epub_path = Path(tmp_file.name)
@@ -92,7 +107,7 @@ class TestEPUBProcessor:
             result = self.processor.process_epub(epub_path)
 
             assert result.success is False
-            assert "Pandoc failed" in result.error_message
+            assert "OmniParser parsing failed" in result.error_message
             assert result.processing_time > 0
 
         finally:
@@ -201,16 +216,21 @@ class TestEPUBProcessor:
             assert data["text"] == "Full text content"
             assert len(data["chapters"]) == 1
 
-    @patch('src.core.epub_processor.PandocConverter')
-    def test_validate_epub_success(self, mock_pandoc_class):
+    @patch('src.core.epub_processor.parse_document')
+    def test_validate_epub_success(self, mock_parse):
         """Test EPUB validation with valid file."""
-        mock_pandoc = Mock()
-        mock_pandoc_class.return_value = mock_pandoc
-        mock_pandoc.extract_metadata.return_value = {"title": "Valid"}
+        # Create mock valid document
+        mock_doc = Mock()
+        mock_metadata = Mock()
+        mock_metadata.title = "Valid"
+        mock_doc.metadata = mock_metadata
+        mock_doc.content = "Valid content"
+        mock_parse.return_value = mock_doc
 
         with tempfile.NamedTemporaryFile(suffix='.epub', delete=False) as tmp_file:
             epub_path = Path(tmp_file.name)
-            tmp_file.write(b"dummy epub content")
+            # Write enough content to pass the size check (>= 1KB)
+            tmp_file.write(b"dummy epub content" * 100)
 
         try:
             issues = self.processor.validate_epub(epub_path)
@@ -251,13 +271,32 @@ class TestEPUBProcessor:
         finally:
             empty_path.unlink()
 
-    @patch('src.core.epub_processor.PandocConverter')
-    def test_get_processing_info(self, mock_pandoc_class):
+    @patch('src.core.epub_processor.parse_document')
+    def test_get_processing_info(self, mock_parse):
         """Test getting processing info without full processing."""
-        mock_pandoc = Mock()
-        mock_pandoc_class.return_value = mock_pandoc
-        mock_pandoc.extract_metadata.return_value = {"title": "Test Book"}
-        mock_pandoc.extract_to_markdown.return_value = ("Content " * 100, Path("/tmp/media"))
+        # Create mock document
+        mock_doc = Mock()
+        mock_doc.content = "Content " * 100
+
+        # Mock metadata
+        mock_metadata = Mock()
+        mock_metadata.title = "Test Book"
+        mock_metadata.author = "Test Author"
+        mock_metadata.authors = ["Test Author"]
+        mock_metadata.publisher = None
+        mock_metadata.publication_date = None
+        mock_metadata.language = "en"
+        mock_metadata.isbn = None
+        mock_metadata.description = None
+        mock_metadata.tags = []
+        mock_metadata.file_size = 1024
+        mock_metadata.word_count = 100
+        mock_doc.metadata = mock_metadata
+
+        mock_doc.chapters = []
+        mock_doc.images = []
+
+        mock_parse.return_value = mock_doc
 
         with tempfile.NamedTemporaryFile(suffix='.epub', delete=False) as tmp_file:
             epub_path = Path(tmp_file.name)
