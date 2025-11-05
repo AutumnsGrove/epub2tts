@@ -62,6 +62,7 @@ dependencies = [
     "aiofiles>=23.0.0",
     "asyncio-throttle>=1.0.0",
     "omniparser",
+    "vocos>=0.1.0",
 ]
 
 [project.optional-dependencies]

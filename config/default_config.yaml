@@ -33,7 +33,7 @@ tts:
 
   # Kokoro settings (local TTS)
   model: "kokoro"
-  model_path: "./models/Kokoro-82M-8bit"
+  model_path: "mlx-community/Kokoro-82M-8bit"  # Using HuggingFace repo (auto-downloads and caches)
   voice: "bf_lily"
   speed: 1.0
   pitch: 1.0
