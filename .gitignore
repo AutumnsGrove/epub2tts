@@ -107,3 +107,4 @@ epub2tts_full.log
 /test_tts_output/
 baseline_*.txt
 comparison_*.json
+diagnostic_output/
