@@ -443,6 +443,10 @@ class KokoroTTSPipeline:
         """
         Preprocess text for optimal TTS synthesis.
 
+        Removes epub2tts markers and cleans text for Kokoro TTS.
+        Note: Kokoro does NOT support SSML tags, so we strip markers entirely
+        rather than converting them to SSML.
+
         Args:
             text: Raw text to preprocess
 
@@ -452,22 +456,31 @@ class KokoroTTSPipeline:
         # Remove or replace TTS-unfriendly patterns
         processed = text
 
-        # Handle pause markers
-        processed = re.sub(r'\[PAUSE: ([\d.]+)\]', r'<break time="\1s"/>', processed)
+        # Handle pause markers - REMOVE entirely (Kokoro doesn't support SSML)
+        # Pauses are natural from punctuation; adding silence can be done post-processing
+        processed = re.sub(r'\[PAUSE:\s*[\d.]+\]', ' ', processed)
 
-        # Handle emphasis markers
-        processed = re.sub(r'\[EMPHASIS_STRONG: ([^\]]+)\]', r'<emphasis level="strong">\1</emphasis>', processed)
-        processed = re.sub(r'\[EMPHASIS_MILD: ([^\]]+)\]', r'<emphasis level="moderate">\1</emphasis>', processed)
+        # Handle emphasis markers - keep the text content, remove markers
+        # Kokoro doesn't support SSML emphasis tags
+        processed = re.sub(r'\[EMPHASIS_STRONG:\s*([^\]]+)\]', r'\1', processed)
+        processed = re.sub(r'\[EMPHASIS_MILD:\s*([^\]]+)\]', r'\1', processed)
 
-        # Handle dialogue markers
+        # Handle dialogue markers - remove entirely
         processed = re.sub(r'\[DIALOGUE_START\]', '', processed)
         processed = re.sub(r'\[DIALOGUE_END\]', '', processed)
 
-        # Handle chapter markers
-        processed = re.sub(r'\[CHAPTER_START: ([^\]]+)\]', r'Chapter: \1. ', processed)
+        # Handle chapter markers - convert to spoken text
+        processed = re.sub(r'\[CHAPTER_START:\s*([^\]]+)\]', r'Chapter: \1. ', processed)
 
-        # Handle image descriptions
-        processed = re.sub(r'\[IMAGE: ([^\]]+)\]', r'Image description: \1. ', processed)
+        # Handle image descriptions - convert to spoken description
+        processed = re.sub(r'\[IMAGE:\s*([^\]]+)\]', r'Image description: \1. ', processed)
+        processed = re.sub(r'\[IMAGE DESCRIPTION:\s*([^\]]+)\]', r'Image description: \1. ', processed)
+
+        # Handle header markers
+        processed = re.sub(r'\[HEADER_END\]', '. ', processed)
+
+        # Remove any remaining bracket markers that weren't caught
+        processed = re.sub(r'\[[A-Z_]+(?::\s*[^\]]+)?\]', ' ', processed)
 
         # Clean up extra whitespace
         processed = re.sub(r'\s+', ' ', processed).strip()
@@ -802,8 +815,12 @@ class MLXKokoroModel:
         if len(cleaned_text) > max_chunk_length:
             chunks = self._split_text_for_synthesis(cleaned_text, max_chunk_length)
             audio_segments = []
+            failed_chunks = 0
+            total_chunks = len(chunks)
 
-            for chunk in chunks:
+            logger.info(f"Processing {total_chunks} text chunks (each ~{max_chunk_length} chars)")
+
+            for chunk_idx, chunk in enumerate(chunks):
                 if chunk.strip():  # Skip empty chunks
                     try:
                         voice_pack = self.pipeline.load_voice(voice)
@@ -811,21 +828,34 @@ class MLXKokoroModel:
 
                         # Check if phonemes/tokens are reasonable length
                         if len(tokens) > 2000:  # Arbitrary safety limit
-                            logger.warning(f"Chunk tokens too long ({len(tokens)}), skipping")
+                            logger.warning(f"Chunk {chunk_idx+1}/{total_chunks}: tokens too long ({len(tokens)}), skipping")
+                            failed_chunks += 1
                             continue
 
                         output = self.pipeline.infer(self.pipeline.model, ps, voice_pack)
                         chunk_audio = output.audio.numpy() if hasattr(output.audio, 'numpy') else output.audio
                         audio_segments.append(chunk_audio)
+                        logger.debug(f"Chunk {chunk_idx+1}/{total_chunks}: generated {len(chunk_audio)} samples")
                     except IndexError as e:
-                        logger.warning(f"Index error on chunk, skipping: {e}")
+                        logger.warning(f"Chunk {chunk_idx+1}/{total_chunks}: index error - '{chunk[:30]}...' - {e}")
+                        failed_chunks += 1
                         continue
                     except Exception as e:
-                        logger.warning(f"Error processing chunk: {e}")
+                        logger.warning(f"Chunk {chunk_idx+1}/{total_chunks}: error - '{chunk[:30]}...' - {e}")
+                        failed_chunks += 1
                         continue
+                else:
+                    logger.debug(f"Chunk {chunk_idx+1}/{total_chunks}: empty, skipping")
+
+            # Log summary
+            success_count = len(audio_segments)
+            logger.info(f"TTS chunk processing: {success_count}/{total_chunks} succeeded, {failed_chunks} failed")
 
             if not audio_segments:
-                raise RuntimeError("No audio segments generated successfully")
+                raise RuntimeError(f"No audio segments generated successfully (0/{total_chunks} chunks)")
+
+            if failed_chunks > 0:
+                logger.warning(f"Some chunks failed: {failed_chunks}/{total_chunks} - audio may be incomplete")
 
             # Concatenate audio segments
             audio_data = np.concatenate(audio_segments)
